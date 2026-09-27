@@ -131,7 +131,8 @@ button:active { transform: scale(.97); }
   .doodle-ai-panel { position:absolute; left:50%; top:5.2rem; z-index:24; width:min(720px,calc(100% - 2rem)); transform:translateX(-50%); border:1px solid rgba(255,255,255,.16); border-radius:1.15rem; padding:1rem; background:rgba(11,16,23,.9); box-shadow:0 24px 70px rgba(0,0,0,.42); backdrop-filter:blur(20px); }
   .doodle-ai-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
   .doodle-ai-label { display:flex; justify-content:space-between; margin-bottom:.4rem; color:rgba(255,255,255,.42); font-size:9px; font-weight:900; letter-spacing:.14em; }
-  .ai-preview-card { display:grid; min-height:220px; place-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:1rem; background:#111824; }
+  .ai-preview-card { position:relative; display:grid; min-height:220px; place-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:1rem; background:#111824; }
+  .live-progress-overlay { position:absolute; right:.65rem; bottom:.65rem; left:.65rem; border:1px solid rgba(215,255,72,.22); border-radius:.7rem; padding:.55rem .65rem; color:rgba(255,255,255,.78); background:rgba(8,11,16,.78); box-shadow:0 8px 25px rgba(0,0,0,.3); backdrop-filter:blur(10px); }
   .live-prompt-input { min-width:0; flex:1; border:1px solid rgba(255,255,255,.12); border-radius:.7rem; padding:.65rem .75rem; color:rgba(255,255,255,.85); background:rgba(255,255,255,.04); font-size:.72rem; outline:none; }
   .live-prompt-input:focus { border-color:rgba(215,255,72,.45); box-shadow:0 0 0 2px rgba(215,255,72,.08); }
   .doodle-launcher { display:flex; width:100%; align-items:center; gap:.7rem; border:1px solid rgba(215,255,72,.18); border-radius:.9rem; padding:.75rem; color:rgba(255,255,255,.7); background:rgba(215,255,72,.05); text-align:left; }
@@ -140,7 +141,20 @@ button:active { transform: scale(.97); }
   .doodle-launcher b { color:#fff; font-size:.72rem; }
   .doodle-launcher small { margin-top:.15rem; color:rgba(255,255,255,.35); font-size:.6rem; }
   .doodle-launcher-icon { display:grid; height:2rem; width:2rem; place-items:center; border-radius:.6rem; color:#10140c; background:#d7ff48; font-weight:900; }
+  .cinema-mode .hud-panel, .cinema-mode .floating-bubbles, .cinema-mode .doodle-ai-panel { opacity:0; pointer-events:none; transform:translateY(-10px); transition:opacity .2s ease, transform .2s ease; }
+  .cinema-mode .hud-panel { transform:translateY(-10px) scale(.98); }
+  .cinema-mode::after { content:"CINEMA MODE · press C or Esc to restore panels"; position:absolute; left:50%; top:1rem; z-index:22; transform:translateX(-50%); border:1px solid rgba(215,255,72,.25); border-radius:999px; padding:.45rem .7rem; color:rgba(215,255,72,.8); background:rgba(8,11,16,.72); font-size:9px; font-weight:900; letter-spacing:.1em; backdrop-filter:blur(14px); }
+  .comparison-overlay { position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:1rem; background:rgba(3,5,8,.72); backdrop-filter:blur(12px); }
+  .comparison-shell { width:min(1180px,100%); max-height:calc(100vh - 2rem); overflow:auto; border:1px solid rgba(255,255,255,.16); border-radius:1.2rem; padding:1.15rem; background:rgba(11,16,23,.96); box-shadow:0 30px 100px rgba(0,0,0,.5); }
+  .comparison-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.8rem; }
+  .comparison-card { min-width:0; border:1px solid rgba(255,255,255,.1); border-radius:.9rem; padding:.7rem; background:rgba(255,255,255,.025); }
+  .comparison-media, .comparison-model { display:grid; min-height:300px; place-items:center; overflow:hidden; border-radius:.7rem; background:#111824; }
+  .comparison-media img { height:100%; width:100%; object-fit:contain; }
+  .comparison-model { position:relative; }
+  .comparison-model > div { position:absolute; inset:0; }
+  kbd { border:1px solid rgba(255,255,255,.16); border-radius:.25rem; padding:.08rem .25rem; color:rgba(255,255,255,.55); font-size:9px; }
   @media (max-width: 760px) { .floating-bubbles { left:.75rem; right:.75rem; width:auto; transform:none; justify-content:center; } .floating-bubble { flex:1; padding-left:.35rem; padding-right:.35rem; font-size:8px; } .doodle-ai-grid { grid-template-columns:1fr; } .doodle-ai-panel { top:5rem; max-height:calc(100vh - 6rem); overflow-y:auto; } }
+  @media (max-width: 900px) { .comparison-grid { grid-template-columns:1fr; } .comparison-media, .comparison-model { min-height:220px; } }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
