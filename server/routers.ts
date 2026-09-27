@@ -5,7 +5,7 @@ import { generateImage } from "./_core/imageGeneration";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
-import { createForgeGeneration, createForgeProject, listForgeProjects } from "./db";
+import { createForgeGeneration, createForgeProject, createForgeSnapshot, deleteForgeSnapshot, listForgeProjects, listForgeSnapshots } from "./db";
 import { getProviderStatus, getThreeDProvider } from "./providers/threeD";
 import { storagePut } from "./storage";
 
@@ -26,6 +26,11 @@ export const appRouter = router({
       const id = await createForgeProject({ name: input.name, slug, userId: ctx.user?.id });
       return { id, name: input.name, slug, persisted: Boolean(id) };
     }),
+  }),
+  snapshots: router({
+    list: publicProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ input }) => listForgeSnapshots(input.projectId)),
+    create: publicProcedure.input(z.object({ projectId: z.number().int().positive(), label: z.string().min(1).max(180), prompt: z.string().max(6000), style: z.string().max(64), doodleUrl: z.string().optional(), referencesJson: z.string().optional(), transformJson: z.string().optional(), conceptUrl: z.string().optional(), modelUrl: z.string().optional() })).mutation(async ({ input }) => ({ id: await createForgeSnapshot(input), label: input.label })),
+    remove: publicProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteForgeSnapshot(input.id)),
   }),
   assets: router({
     uploadReference: publicProcedure.input(z.object({ dataUrl: z.string().min(30), filename: z.string().max(160), mimeType: z.string().max(120) })).mutation(async ({ input }) => {

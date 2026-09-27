@@ -45,8 +45,23 @@ export const forgeReferences = mysqlTable("forge_references", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const forgeProjectSnapshots = mysqlTable("forge_project_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull(),
+  label: varchar("label", { length: 180 }).notNull(),
+  prompt: text("prompt").notNull(),
+  style: varchar("style", { length: 64 }).notNull(),
+  doodleUrl: text("doodleUrl"),
+  referencesJson: text("referencesJson"),
+  transformJson: text("transformJson"),
+  conceptUrl: text("conceptUrl"),
+  modelUrl: text("modelUrl"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ForgeProject = typeof forgeProjects.$inferSelect;
 export type ForgeGeneration = typeof forgeGenerations.$inferSelect;
 export type ForgeReference = typeof forgeReferences.$inferSelect;
+export type ForgeProjectSnapshot = typeof forgeProjectSnapshots.$inferSelect;

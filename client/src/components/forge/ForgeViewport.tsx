@@ -1,161 +1,54 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, Grid, OrbitControls, PerspectiveCamera, TransformControls, useGLTF } from "@react-three/drei";
+import { Canvas } from "@react-three/fiber";
+import { Environment, Grid, OrbitControls, PerspectiveCamera, Sky, TransformControls, useGLTF } from "@react-three/drei";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { OBJExporter } from "three/examples/jsm/exporters/OBJExporter.js";
 import * as THREE from "three";
 import { exportAsciiFbx } from "./fbxExporter";
-import { Box, ChevronDown, Crosshair, Download, Eye, EyeOff, Move3D, Rotate3D, Scaling, SlidersHorizontal } from "lucide-react";
+import { Box, Crosshair, Download, Eye, EyeOff, Focus, Move3D, Rotate3D, Scaling, SlidersHorizontal, SquareDashedMousePointer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export type TransformMode = "translate" | "rotate" | "scale";
 export type ExportFormat = "glb" | "obj" | "fbx";
-export type ForgeViewportHandle = {
-  export: (format: ExportFormat) => Promise<void>;
-  focusObject: () => void;
-  setTransform: (kind: "position" | "rotation" | "scale", axis: "x" | "y" | "z", value: number) => void;
-};
+export type CameraPreset = "front" | "top" | "side";
+export type ForgeViewportHandle = { export: (format: ExportFormat) => Promise<void>; focusObject: () => void; focusSelection: () => void; frameAll: () => void; setCameraPreset: (preset: CameraPreset) => void; setTransform: (kind: "position" | "rotation" | "scale", axis: "x" | "y" | "z", value: number) => void };
 
-type Props = {
-  wireframe: boolean;
-  lightPower: number;
-  materialColor: string;
-  environment: "studio" | "sunset" | "night";
-  importedUrl?: string;
-  onSelectionChange?: (name: string, object?: THREE.Object3D, objects?: THREE.Object3D[]) => void;
-  onTransformChange?: (object?: THREE.Object3D) => void;
-  transformMode?: TransformMode;
-};
+type Props = { wireframe: boolean; lightPower: number; materialColor: string; environment: "studio" | "sunset" | "night"; importedUrl?: string; onSelectionChange?: (name: string, object?: THREE.Object3D, objects?: THREE.Object3D[]) => void; onTransformChange?: (object?: THREE.Object3D) => void; transformMode?: TransformMode };
+type SceneState = { selected: string; selectedObject?: THREE.Object3D; selectedObjects: THREE.Object3D[]; mode: TransformMode; visible: boolean; showOutliner: boolean; setSelected: (value: string) => void; setSelectedObject: (value: THREE.Object3D) => void; setSelectedObjects: (value: THREE.Object3D[]) => void; setMode: (value: TransformMode) => void; setVisible: (value: boolean) => void; setShowOutliner: (value: boolean) => void; onTransformChange?: (object?: THREE.Object3D) => void; onSelectionChange?: (name: string, object?: THREE.Object3D, objects?: THREE.Object3D[]) => void };
 
-type SceneState = {
-  selected: string;
-  selectedObject?: THREE.Object3D;
-  selectedObjects: THREE.Object3D[];
-  mode: TransformMode;
-  visible: boolean;
-  showOutliner: boolean;
-  setSelected: (value: string) => void;
-  setSelectedObject: (value: THREE.Object3D) => void;
-  setSelectedObjects: (value: THREE.Object3D[]) => void;
-  setMode: (value: TransformMode) => void;
-  setVisible: (value: boolean) => void;
-  setShowOutliner: (value: boolean) => void;
-  onTransformChange?: (object?: THREE.Object3D) => void;
-  onSelectionChange?: (name: string, object?: THREE.Object3D, objects?: THREE.Object3D[]) => void;
-};
-
-function CyberneticExplorer({ wireframe, materialColor, scene }: Pick<Props, "wireframe" | "materialColor"> & { scene: SceneState }) {
-  const ring = useRef<THREE.Mesh>(null);
-  const primary = useMemo(() => new THREE.MeshStandardMaterial({ color: materialColor, metalness: 0.72, roughness: 0.28, wireframe }), [materialColor, wireframe]);
-  const dark = useMemo(() => new THREE.MeshStandardMaterial({ color: "#151b25", metalness: 0.88, roughness: 0.2, wireframe }), [wireframe]);
-  const glow = useMemo(() => new THREE.MeshStandardMaterial({ color: "#d7ff48", emissive: "#a8ce16", emissiveIntensity: 3.2, metalness: 0.2, roughness: 0.2, wireframe }), [wireframe]);
-  useFrame(({ clock }) => { if (ring.current) ring.current.rotation.z = clock.getElapsedTime() * 0.45; });
-  const select = (event: { stopPropagation: () => void; object?: THREE.Object3D; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }, name: string) => { event.stopPropagation(); if (!event.object) return; const additive = Boolean(event.shiftKey || event.ctrlKey || event.metaKey); const next = additive ? (scene.selectedObjects.some(item => item === event.object) ? scene.selectedObjects.filter(item => item !== event.object) : [...scene.selectedObjects, event.object]) : [event.object]; scene.setSelectedObjects(next); scene.setSelected(name); scene.setSelectedObject(next[0] ?? event.object); scene.onSelectionChange?.(next.length > 1 ? `${name} +${next.length - 1}` : name, next[0] ?? event.object, next); };
-  const hidden = !scene.visible;
-  return (
-    <group position={[0, -0.75, 0]} visible={!hidden}>
-      <mesh name="Explorer Body" castShadow receiveShadow material={primary} onClick={event => select(event, "Explorer Body")}><boxGeometry args={[1.45, 1.65, 1.05]} /></mesh>
-      <mesh name="Explorer Head" position={[0, 1.12, 0]} castShadow material={dark} onClick={event => select(event, "Explorer Head")}><sphereGeometry args={[0.72, 24, 16]} /></mesh>
-      <mesh name="Energy Visor" position={[0, 1.12, 0.62]} material={glow} onClick={event => select(event, "Energy Visor")}><boxGeometry args={[0.34, 0.16, 0.08]} /></mesh>
-      <mesh name="Antenna Left" position={[-0.28, 1.45, 0]} castShadow material={dark} onClick={event => select(event, "Antenna Left")}><cylinderGeometry args={[0.08, 0.08, 0.42, 12]} /></mesh>
-      <mesh name="Antenna Right" position={[0.28, 1.45, 0]} castShadow material={dark} onClick={event => select(event, "Antenna Right")}><cylinderGeometry args={[0.08, 0.08, 0.42, 12]} /></mesh>
-      <mesh name="Antenna Light" position={[0, 1.7, 0]} material={glow} onClick={event => select(event, "Antenna Light")}><sphereGeometry args={[0.09, 12, 8]} /></mesh>
-      <mesh name="Energy Pack" position={[0, -0.06, -0.58]} castShadow material={dark} onClick={event => select(event, "Energy Pack")}><boxGeometry args={[0.58, 0.95, 0.18]} /></mesh>
-      <mesh name="Arm Left" position={[-0.9, 0.2, 0]} rotation={[0, 0, -0.18]} castShadow material={primary} onClick={event => select(event, "Arm Left")}><capsuleGeometry args={[0.22, 0.75, 8, 16]} /></mesh>
-      <mesh name="Arm Right" position={[0.9, 0.2, 0]} rotation={[0, 0, 0.18]} castShadow material={primary} onClick={event => select(event, "Arm Right")}><capsuleGeometry args={[0.22, 0.75, 8, 16]} /></mesh>
-      <mesh name="Leg Left" position={[-0.43, -1.25, 0]} castShadow material={dark} onClick={event => select(event, "Leg Left")}><boxGeometry args={[0.38, 1.1, 0.5]} /></mesh>
-      <mesh name="Leg Right" position={[0.43, -1.25, 0]} castShadow material={dark} onClick={event => select(event, "Leg Right")}><boxGeometry args={[0.38, 1.1, 0.5]} /></mesh>
-      <mesh name="Power Ring" position={[0, 0.1, 0.56]} ref={ring} rotation={[Math.PI / 2, 0, 0]} material={glow} onClick={event => select(event, "Power Ring")}><torusGeometry args={[0.38, 0.035, 8, 48]} /></mesh>
-    </group>
-  );
-}
-
-function SceneContent({ wireframe, materialColor, importedUrl, scene }: Pick<Props, "wireframe" | "materialColor" | "importedUrl"> & { scene: SceneState }) {
-  const selectedObject = useRef<THREE.Object3D>(null);
+function SceneContent({ wireframe, importedUrl, scene }: Pick<Props, "wireframe" | "importedUrl"> & { scene: SceneState }) {
   const selectionPivot = useRef<THREE.Group>(null);
-  useFrame(() => { if (!selectionPivot.current || scene.selectedObjects.length < 2) return; const center = new THREE.Vector3(); scene.selectedObjects.forEach(object => center.add(object.position)); center.multiplyScalar(1 / scene.selectedObjects.length); selectionPivot.current.position.copy(center); });
-  return (
-    <group ref={selectedObject}>
-      {importedUrl ? <ImportedModel url={importedUrl} onSelect={() => scene.setSelected("Imported Model")} /> : <CyberneticExplorer wireframe={wireframe} materialColor={materialColor} scene={scene} />}
-      {scene.selected !== "Scene" && <TransformControls mode={scene.mode} object={scene.selectedObjects.length > 1 ? selectionPivot.current ?? undefined : scene.selectedObject} size={0.8} onObjectChange={() => scene.onTransformChange?.(scene.selectedObject)} />}
-      <group ref={selectionPivot} visible={false} />
-    </group>
-  );
+  useEffect(() => { if (selectionPivot.current && scene.selectedObjects.length) { const center = new THREE.Vector3(); scene.selectedObjects.forEach(object => center.add(object.getWorldPosition(new THREE.Vector3()))); center.multiplyScalar(1 / scene.selectedObjects.length); selectionPivot.current.position.copy(center); } }, [scene.selectedObjects]);
+  const select = (event: { stopPropagation: () => void; object?: THREE.Object3D; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }, name: string) => { event.stopPropagation(); const object = event.object; if (!object) return; const additive = Boolean(event.shiftKey || event.ctrlKey || event.metaKey); const next = additive ? (scene.selectedObjects.some(item => item === object) ? scene.selectedObjects.filter(item => item !== object) : [...scene.selectedObjects, object]) : [object]; scene.setSelectedObjects(next); scene.setSelected(name); scene.setSelectedObject(next[0] ?? object); scene.onSelectionChange?.(next.length > 1 ? `${name} +${next.length - 1}` : name, next[0] ?? object, next); };
+  return <group>
+    {importedUrl ? <ImportedModel url={importedUrl} onSelect={event => select(event, "Imported Model")} /> : null}
+    {scene.selectedObjects.length > 0 && <TransformControls mode={scene.mode} object={scene.selectedObjects.length > 1 ? selectionPivot.current ?? undefined : scene.selectedObject} size={0.85} onObjectChange={() => scene.onTransformChange?.(scene.selectedObject)} />}
+    <group ref={selectionPivot} visible={false} />
+  </group>;
 }
 
-function ImportedModel({ url, onSelect }: { url: string; onSelect: () => void }) {
-  const { scene } = useGLTF(url);
-  return <primitive object={scene} scale={1.6} position={[0, -1.1, 0]} onClick={onSelect} />;
-}
+function ImportedModel({ url, onSelect }: { url: string; onSelect: (event: { stopPropagation: () => void; object?: THREE.Object3D; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => void }) { const { scene } = useGLTF(url); return <primitive object={scene} scale={1.6} position={[0, -1.1, 0]} onClick={onSelect} />; }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const href = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = href;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(href);
-}
+function downloadBlob(blob: Blob, filename: string) { const href = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = href; anchor.download = filename; anchor.click(); URL.revokeObjectURL(href); }
 
-export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function ForgeViewport({ wireframe, lightPower, materialColor, environment, importedUrl, onSelectionChange, onTransformChange, transformMode }, ref) {
-  const [selected, setSelected] = useState("Scene");
-  const [selectedObject, setSelectedObject] = useState<THREE.Object3D>();
-  const [selectedObjects, setSelectedObjects] = useState<THREE.Object3D[]>([]);
-  const [mode, setMode] = useState<TransformMode>("translate");
-  const [visible, setVisible] = useState(true);
-  const [showOutliner, setShowOutliner] = useState(true);
-  const controlsRef = useRef<any>(null);
-  const exportRoot = useRef<THREE.Group | null>(null);
-  const sceneEnvironment = environment === "night" ? "night" : environment === "sunset" ? "sunset" : "studio";
-  const activeMode = transformMode ?? mode;
+export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function ForgeViewport({ wireframe, lightPower, materialColor: _materialColor, environment, importedUrl, onSelectionChange, onTransformChange, transformMode }, ref) {
+  const [selected, setSelected] = useState("Scene"); const [selectedObject, setSelectedObject] = useState<THREE.Object3D>(); const [selectedObjects, setSelectedObjects] = useState<THREE.Object3D[]>([]); const [mode, setMode] = useState<TransformMode>("translate"); const [visible, setVisible] = useState(true); const [showOutliner, setShowOutliner] = useState(true); const controlsRef = useRef<any>(null); const exportRoot = useRef<THREE.Group | null>(null); const activeMode = transformMode ?? mode;
   const sceneState: SceneState = { selected, selectedObject, selectedObjects, mode: activeMode, visible, showOutliner, setSelected, setSelectedObject, setSelectedObjects, setMode, setVisible, setShowOutliner, onTransformChange, onSelectionChange };
-  const focusObject = () => { const source = exportRoot.current; const controls = controlsRef.current; const camera = controls?.object as THREE.PerspectiveCamera | undefined; if (!source || !controls || !camera) return; const bounds = new THREE.Box3().setFromObject(source); if (bounds.isEmpty()) return; const center = bounds.getCenter(new THREE.Vector3()); const size = bounds.getSize(new THREE.Vector3()); const distance = Math.max(size.length() * 1.35, 3.8); camera.position.copy(center.clone().add(new THREE.Vector3(1, 0.65, 1).normalize().multiplyScalar(distance))); camera.lookAt(center); controls.target.copy(center); controls.update(); };
-  useEffect(() => { const timer = window.setTimeout(focusObject, importedUrl ? 180 : 80); return () => window.clearTimeout(timer); }, [importedUrl]);
-
-  useImperativeHandle(ref, () => ({
-    export: async (format: ExportFormat) => {
-      const source = exportRoot.current;
-      if (!source) throw new Error("No model in viewport");
-      if (format === "glb") {
-        const exporter = new GLTFExporter();
-        const result = await new Promise<ArrayBuffer>((resolve, reject) => exporter.parse(source, value => resolve(value instanceof ArrayBuffer ? value : new TextEncoder().encode(JSON.stringify(value)).buffer), reject, { binary: true }));
-        downloadBlob(new Blob([result], { type: "model/gltf-binary" }), "forge-cybernetic-explorer.glb");
-      } else if (format === "obj") {
-        const result = new OBJExporter().parse(source);
-        downloadBlob(new Blob([result], { type: "text/plain" }), "forge-cybernetic-explorer.obj");
-      } else {
-        const result = exportAsciiFbx(source);
-        downloadBlob(new Blob([result], { type: "application/octet-stream" }), "forge-cybernetic-explorer.fbx");
-      }
-    },
-    focusObject,
-    setTransform: (kind, axis, value) => { const targets = selectedObjects.length ? selectedObjects : selectedObject ? [selectedObject] : []; targets.forEach(object => { object[kind][axis] = value; }); onTransformChange?.(selectedObject); },
-  }), [selectedObject, selectedObjects, onTransformChange]);
-
-  return (
-    <div className="relative h-full min-h-[500px] w-full overflow-hidden rounded-[1.4rem] border border-white/10 bg-[#0b1017]">
-      <Canvas shadows dpr={[1, 1.6]} camera={{ position: [5.8, 3.8, 7.6], fov: 42 }} gl={{ antialias: true }}>
-        <color attach="background" args={["#0b1017"]} />
-        <PerspectiveCamera makeDefault position={[3.8, 2.3, 4.8]} fov={42} />
-        <ambientLight intensity={0.45} />
-        <directionalLight castShadow position={[3, 5, 4]} intensity={lightPower} color="#f2f5ff" shadow-mapSize={[2048, 2048]} />
-        <pointLight position={[-3, 1, 2]} intensity={lightPower * 0.7} color="#b8d8ff" />
-        <group ref={exportRoot}><SceneContent wireframe={wireframe} materialColor={materialColor} importedUrl={importedUrl} scene={sceneState} /></group>
-        <Grid args={[12, 12]} cellSize={0.4} cellThickness={0.5} cellColor="#273142" sectionSize={2} sectionThickness={0.9} sectionColor="#3c4b5f" fadeDistance={14} infiniteGrid />
-        <Environment preset={sceneEnvironment as "studio" | "sunset" | "night"} background={false} />
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} minDistance={2.4} maxDistance={14} target={[0, -0.35, 0]} />
-      </Canvas>
-      <div className="absolute left-3 top-3 flex items-center gap-1 rounded-xl border border-white/10 bg-[#0b1017]/90 p-1.5 backdrop-blur">
-        <Button size="icon" variant="ghost" className={mode === "translate" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/50"} onClick={() => setMode("translate")} title="Translate"><Move3D className="h-3.5 w-3.5" /></Button>
-        <Button size="icon" variant="ghost" className={mode === "rotate" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/50"} onClick={() => setMode("rotate")} title="Rotate"><Rotate3D className="h-3.5 w-3.5" /></Button>
-        <Button size="icon" variant="ghost" className={mode === "scale" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/50"} onClick={() => setMode("scale")} title="Scale"><Scaling className="h-3.5 w-3.5" /></Button>
-        <span className="mx-1 h-5 w-px bg-white/10" />
-        <Button size="icon" variant="ghost" className="text-white/50" onClick={() => setShowOutliner(value => !value)} title="Scene outliner"><SlidersHorizontal className="h-3.5 w-3.5" /></Button>
-        <Button size="icon" variant="ghost" className="text-white/50" onClick={() => setVisible(value => !value)} title="Toggle visibility">{visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</Button>
-      </div>
-      {showOutliner && <div className="absolute right-3 top-3 w-44 rounded-xl border border-white/10 bg-[#0b1017]/90 p-2 backdrop-blur"><div className="mb-2 flex items-center justify-between px-1 text-[9px] font-bold uppercase tracking-[.18em] text-white/35"><span>Scene {selectedObjects.length > 1 ? `· ${selectedObjects.length} selected` : ""}</span><Box className="h-3 w-3" /></div>{["Scene", "Explorer Body", "Explorer Head", "Energy Pack", "Antenna Light"].map(item => <button key={item} onClick={() => setSelected(item)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[10px] ${selected === item ? "bg-[#d7ff48]/10 text-[#d7ff48]" : "text-white/45 hover:bg-white/5 hover:text-white/80"}`}><span className={`h-1.5 w-1.5 rounded-full ${selected === item ? "bg-[#d7ff48]" : "bg-white/20"}`} />{item}</button>)}</div>}
-      {selected !== "Scene" && <div className="absolute bottom-4 left-4 rounded-lg border border-[#d7ff48]/20 bg-[#0b1017]/90 px-3 py-2 text-[10px] text-white/65 backdrop-blur"><span className="font-bold text-[#d7ff48]">{selectedObjects.length > 1 ? `GROUP · ${selectedObjects.length} OBJECTS` : selected}</span><span className="mx-2 text-white/20">•</span>{mode} gizmo active</div>}
-      <div className="pointer-events-none absolute bottom-3 right-4 text-[10px] font-semibold uppercase tracking-[.22em] text-white/35">Orbit / pan / zoom</div>
-    </div>
-  );
+  const fitBounds = (bounds: THREE.Box3, preset?: CameraPreset) => { const controls = controlsRef.current; const camera = controls?.object as THREE.PerspectiveCamera | undefined; if (!controls || !camera || bounds.isEmpty()) return; const center = bounds.getCenter(new THREE.Vector3()); const size = bounds.getSize(new THREE.Vector3()); const distance = Math.max(size.length() * 1.25, 4.2); const direction = preset === "top" ? new THREE.Vector3(0, 1, 0.01) : preset === "side" ? new THREE.Vector3(1, 0.28, 0.01) : new THREE.Vector3(0.55, 0.35, 1); camera.position.copy(center.clone().add(direction.normalize().multiplyScalar(distance))); camera.lookAt(center); controls.target.copy(center); controls.update(); };
+  const frameAll = () => { if (exportRoot.current) fitBounds(new THREE.Box3().setFromObject(exportRoot.current)); };
+  const focusSelection = () => { if (selectedObjects.length) { const bounds = new THREE.Box3(); selectedObjects.forEach(object => bounds.expandByObject(object)); fitBounds(bounds); } else frameAll(); };
+  const focusObject = frameAll;
+  const setCameraPreset = (preset: CameraPreset) => { if (exportRoot.current) fitBounds(new THREE.Box3().setFromObject(exportRoot.current), preset); };
+  useEffect(() => { const timer = window.setTimeout(frameAll, importedUrl ? 260 : 80); return () => window.clearTimeout(timer); }, [importedUrl]);
+  useEffect(() => { const onKeyDown = (event: KeyboardEvent) => { if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return; const key = event.key.toLowerCase(); if (key === "f") focusSelection(); if (key === "a") frameAll(); if (key === "1") setCameraPreset("front"); if (key === "2") setCameraPreset("top"); if (key === "3") setCameraPreset("side"); }; window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown); });
+  useImperativeHandle(ref, () => ({ export: async format => { const source = exportRoot.current; if (!source || !importedUrl) throw new Error("No model in viewport"); if (format === "glb") { const exporter = new GLTFExporter(); const result = await new Promise<ArrayBuffer>((resolve, reject) => exporter.parse(source, value => resolve(value instanceof ArrayBuffer ? value : new TextEncoder().encode(JSON.stringify(value)).buffer), reject, { binary: true })); downloadBlob(new Blob([result], { type: "model/gltf-binary" }), "forge-model.glb"); } else if (format === "obj") downloadBlob(new Blob([new OBJExporter().parse(source)], { type: "text/plain" }), "forge-model.obj"); else downloadBlob(new Blob([exportAsciiFbx(source)], { type: "application/octet-stream" }), "forge-model.fbx"); }, focusObject, focusSelection, frameAll, setCameraPreset, setTransform: (kind, axis, value) => { const targets = selectedObjects.length ? selectedObjects : selectedObject ? [selectedObject] : []; targets.forEach(object => { object[kind][axis] = value; }); onTransformChange?.(selectedObject); } }), [importedUrl, selectedObject, selectedObjects, onTransformChange]);
+  const skyColor = environment === "night" ? "#071225" : environment === "sunset" ? "#3a1d2d" : "#89a7c7";
+  return <div className="relative h-full min-h-[680px] w-full overflow-hidden rounded-[1.4rem] border border-white/10 bg-[#0b1017] shadow-2xl shadow-black/30"><Canvas shadows dpr={[1, 1.6]} camera={{ position: [5, 3, 7], fov: 42 }} gl={{ antialias: true }}><color attach="background" args={[skyColor]} /><PerspectiveCamera makeDefault position={[5, 3, 7]} fov={42} /><ambientLight intensity={environment === "night" ? 0.18 : 0.45} /><directionalLight castShadow position={[4, 7, 3]} intensity={lightPower} color="#f2f5ff" shadow-mapSize={[2048, 2048]} /><pointLight position={[-3, 2, 2]} intensity={lightPower * 0.65} color="#b8d8ff" /><Sky distance={450} sunPosition={environment === "night" ? [-1, -0.2, -1] : environment === "sunset" ? [-2, 1, -1] : [4, 5, 2]} inclination={0.48} azimuth={0.25} /><mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.05, 0]} receiveShadow><planeGeometry args={[80, 80]} /><meshStandardMaterial color={environment === "night" ? "#101827" : "#283b4d"} roughness={0.92} /></mesh><group ref={exportRoot}><SceneContent wireframe={wireframe} importedUrl={importedUrl} scene={sceneState} /></group><Grid args={[40, 40]} cellSize={0.5} cellThickness={0.45} cellColor="#7890a5" sectionSize={5} sectionThickness={0.9} sectionColor="#a9bfd1" fadeDistance={28} infiniteGrid position={[0, -2.02, 0]} /><Environment preset={environment} background={false} /><OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} minDistance={1.5} maxDistance={40} target={[0, -0.4, 0]} /></Canvas>
+    <div className="absolute left-4 top-4 flex items-center gap-1 rounded-xl border border-white/15 bg-[#0b1017]/85 p-1.5 shadow-lg backdrop-blur"><Button size="icon" variant="ghost" className={activeMode === "translate" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/55"} onClick={() => setMode("translate")} title="G · Move"><Move3D className="h-3.5 w-3.5" /></Button><Button size="icon" variant="ghost" className={activeMode === "rotate" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/55"} onClick={() => setMode("rotate")} title="R · Rotate"><Rotate3D className="h-3.5 w-3.5" /></Button><Button size="icon" variant="ghost" className={activeMode === "scale" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/55"} onClick={() => setMode("scale")} title="S · Scale"><Scaling className="h-3.5 w-3.5" /></Button><span className="mx-1 h-5 w-px bg-white/15" /><Button size="icon" variant="ghost" className="text-white/55" onClick={() => setShowOutliner(value => !value)} title="Toggle scene"><SlidersHorizontal className="h-3.5 w-3.5" /></Button><Button size="icon" variant="ghost" className="text-white/55" onClick={() => setVisible(value => !value)} title="Toggle visibility">{visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</Button></div>
+    <div className="absolute bottom-4 left-4 flex flex-wrap items-center gap-1.5 rounded-xl border border-white/15 bg-[#0b1017]/85 p-2 shadow-lg backdrop-blur"><button onClick={focusSelection} className="camera-action"><Focus className="h-3 w-3" /> Focus selection <kbd>F</kbd></button><button onClick={frameAll} className="camera-action"><SquareDashedMousePointer className="h-3 w-3" /> Frame all <kbd>A</kbd></button><button onClick={() => setCameraPreset("front")} className="camera-action">Front <kbd>1</kbd></button><button onClick={() => setCameraPreset("top")} className="camera-action">Top <kbd>2</kbd></button><button onClick={() => setCameraPreset("side")} className="camera-action">Side <kbd>3</kbd></button></div>
+    {showOutliner && <div className="absolute right-4 top-4 w-48 rounded-xl border border-white/15 bg-[#0b1017]/85 p-2 shadow-lg backdrop-blur"><div className="mb-2 flex items-center justify-between px-1 text-[9px] font-bold uppercase tracking-[.18em] text-white/40"><span>Scene {selectedObjects.length > 1 ? `· GROUP ${selectedObjects.length}` : ""}</span><Box className="h-3 w-3" /></div><button onClick={() => { setSelected("Scene"); setSelectedObjects([]); }} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[10px] ${selected === "Scene" ? "bg-[#d7ff48]/10 text-[#d7ff48]" : "text-white/50"}`}><span className="h-1.5 w-1.5 rounded-full bg-white/25" />Scene</button>{importedUrl && <button onClick={() => setSelected("Imported Model")} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[10px] ${selected === "Imported Model" ? "bg-[#d7ff48]/10 text-[#d7ff48]" : "text-white/50"}`}><span className={`h-1.5 w-1.5 rounded-full ${selected === "Imported Model" ? "bg-[#d7ff48]" : "bg-white/25"}`} />Imported Model</button>}{selectedObjects.length > 1 && <div className="mt-2 rounded-lg border border-[#d7ff48]/25 bg-[#d7ff48]/10 px-2 py-2 text-[9px] font-bold uppercase tracking-wider text-[#d7ff48]">Grouped selection<br /><span className="font-normal text-white/55">{selectedObjects.length} objects · group transform</span></div>}</div>}
+    {!importedUrl && <div className="pointer-events-none absolute inset-0 grid place-items-center"><div className="rounded-2xl border border-dashed border-white/20 bg-[#0b1017]/35 px-8 py-6 text-center backdrop-blur-sm"><Box className="mx-auto mb-3 h-8 w-8 text-white/25" /><div className="text-sm font-semibold text-white/55">Your 3D stage is empty</div><div className="mt-1 max-w-xs text-xs text-white/30">Generate or import a model to see it inside the game-like scene.</div></div></div>}
+    {selected !== "Scene" && <div className="absolute right-4 bottom-20 rounded-lg border border-[#d7ff48]/25 bg-[#0b1017]/85 px-3 py-2 text-[10px] text-white/65 backdrop-blur"><span className="font-bold text-[#d7ff48]">{selectedObjects.length > 1 ? `GROUP · ${selectedObjects.length} OBJECTS` : selected}</span><span className="mx-2 text-white/20">•</span>{activeMode} gizmo</div>}
+    <div className="pointer-events-none absolute right-4 bottom-4 text-[10px] font-semibold uppercase tracking-[.22em] text-white/45">Orbit · pan · zoom</div>
+  </div>;
 });

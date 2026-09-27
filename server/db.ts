@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   forgeGenerations,
+  forgeProjectSnapshots,
   forgeProjects,
   forgeReferences,
   InsertUser,
@@ -105,4 +106,34 @@ export async function createForgeReference(input: {
   if (!db) return null;
   const result = await db.insert(forgeReferences).values(input);
   return Number(result[0].insertId);
+}
+
+export async function createForgeSnapshot(input: {
+  projectId: number;
+  label: string;
+  prompt: string;
+  style: string;
+  doodleUrl?: string;
+  referencesJson?: string;
+  transformJson?: string;
+  conceptUrl?: string;
+  modelUrl?: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(forgeProjectSnapshots).values(input);
+  return Number(result[0].insertId);
+}
+
+export async function listForgeSnapshots(projectId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(forgeProjectSnapshots).where(eq(forgeProjectSnapshots.projectId, projectId)).orderBy(desc(forgeProjectSnapshots.createdAt));
+}
+
+export async function deleteForgeSnapshot(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(forgeProjectSnapshots).where(eq(forgeProjectSnapshots.id, id));
+  return true;
 }

@@ -2,9 +2,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { Eraser, Redo2, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export type DoodleCanvasHandle = { exportPng: () => string | null; clear: () => void; undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean };
+export type DoodleCanvasHandle = { exportPng: () => string | null; clear: () => void; undo: () => void; redo: () => void; loadSnapshot: (image: string) => void; canUndo: boolean; canRedo: boolean };
 
-export const DoodleCanvas = forwardRef<DoodleCanvasHandle>(function DoodleCanvas(_, ref) {
+export const DoodleCanvas = forwardRef<DoodleCanvasHandle, { initialSnapshot?: string; onChange?: (snapshot: string) => void }>(function DoodleCanvas({ initialSnapshot, onChange }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawing, setDrawing] = useState(false);
   const [tool, setTool] = useState<"draw" | "erase">("draw");
@@ -20,17 +20,18 @@ export const DoodleCanvas = forwardRef<DoodleCanvasHandle>(function DoodleCanvas
     for (let y = 24; y < height; y += 24) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
   };
   const snapshot = () => canvasRef.current?.toDataURL("image/png") ?? null;
-  const pushHistory = (image: string | null) => { if (!image) return; setHistory(current => [...current.slice(0, historyIndex + 1), image].slice(-40)); setHistoryIndex(current => Math.min(current + 1, 39)); };
+  const pushHistory = (image: string | null) => { if (!image) return; setHistory(current => [...current.slice(0, historyIndex + 1), image].slice(-40)); setHistoryIndex(current => Math.min(current + 1, 39)); onChange?.(image); };
   const restore = (image: string) => { const canvas = canvasRef.current; const ctx = canvas?.getContext("2d"); if (!canvas || !ctx) return; const img = new Image(); img.onload = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); }; img.src = image; };
 
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return; const dpr = window.devicePixelRatio || 1; const rect = canvas.getBoundingClientRect(); canvas.width = rect.width * dpr; canvas.height = rect.height * dpr; const ctx = canvas.getContext("2d"); if (!ctx) return; ctx.scale(dpr, dpr); paintBackground(ctx, rect.width, rect.height); const initial = canvas.toDataURL("image/png"); setHistory([initial]); setHistoryIndex(0);
+    const canvas = canvasRef.current; if (!canvas) return; const dpr = window.devicePixelRatio || 1; const rect = canvas.getBoundingClientRect(); canvas.width = rect.width * dpr; canvas.height = rect.height * dpr; const ctx = canvas.getContext("2d"); if (!ctx) return; ctx.scale(dpr, dpr); paintBackground(ctx, rect.width, rect.height); if (initialSnapshot) { const image = new Image(); image.onload = () => { ctx.clearRect(0, 0, rect.width, rect.height); ctx.drawImage(image, 0, 0, rect.width, rect.height); const restored = canvas.toDataURL("image/png"); setHistory([restored]); setHistoryIndex(0); }; image.src = initialSnapshot; } else { const initial = canvas.toDataURL("image/png"); setHistory([initial]); setHistoryIndex(0); }
   }, []);
 
   const undo = () => { if (historyIndex <= 0) return; const next = historyIndex - 1; setHistoryIndex(next); restore(history[next]); };
   const redo = () => { if (historyIndex >= history.length - 1) return; const next = historyIndex + 1; setHistoryIndex(next); restore(history[next]); };
+  const loadSnapshot = (image: string) => { restore(image); setHistory([image]); setHistoryIndex(0); };
   const clear = () => { const canvas = canvasRef.current; const ctx = canvas?.getContext("2d"); if (!canvas || !ctx) return; const rect = canvas.getBoundingClientRect(); paintBackground(ctx, rect.width, rect.height); pushHistory(snapshot()); };
-  useImperativeHandle(ref, () => ({ exportPng: snapshot, clear, undo, redo, canUndo: historyIndex > 0, canRedo: historyIndex < history.length - 1 }), [history, historyIndex]);
+  useImperativeHandle(ref, () => ({ exportPng: snapshot, clear, undo, redo, loadSnapshot, canUndo: historyIndex > 0, canRedo: historyIndex < history.length - 1 }), [history, historyIndex]);
 
   const point = (event: React.PointerEvent<HTMLCanvasElement>) => { const canvas = canvasRef.current; if (!canvas) return null; const rect = canvas.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; };
   const start = (event: React.PointerEvent<HTMLCanvasElement>) => { const canvas = canvasRef.current; const ctx = canvas?.getContext("2d"); const p = point(event); if (!ctx || !p) return; canvas?.setPointerCapture(event.pointerId); beforeStroke.current = snapshot(); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.strokeStyle = tool === "erase" ? "#111824" : color; ctx.lineWidth = tool === "erase" ? brush * 2.3 : brush; ctx.lineCap = "round"; ctx.lineJoin = "round"; setDrawing(true); };

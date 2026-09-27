@@ -117,6 +117,12 @@ button:active { transform: scale(.97); }
   .inspector-input { width:100%; border:1px solid rgba(255,255,255,.09); border-radius:.55rem; padding:.48rem .35rem; color:rgba(255,255,255,.8); background:#111824; font-size:11px; font-family:"DM Mono", monospace; }
   .inspector-input:focus { outline:1px solid rgba(215,255,72,.55); }
   .history-action { display:inline-flex; align-items:center; gap:.25rem; border:1px solid rgba(255,255,255,.08); border-radius:.45rem; padding:.3rem .45rem; background:rgba(255,255,255,.03); font-size:9px; font-weight:800; }
+  .hud-panel { border:1px solid rgba(255,255,255,.14); border-radius:1.1rem; padding:1rem; background:rgba(11,16,23,.86); box-shadow:0 18px 55px rgba(0,0,0,.32), inset 0 1px rgba(255,255,255,.04); backdrop-filter:blur(18px); }
+  .hud-status { border:1px solid rgba(215,255,72,.28); border-radius:999px; padding:.25rem .42rem; color:#d7ff48; font-size:8px; font-weight:900; letter-spacing:.12em; }
+  .camera-action { display:inline-flex; align-items:center; gap:.32rem; border:1px solid rgba(255,255,255,.1); border-radius:.55rem; padding:.42rem .52rem; color:rgba(255,255,255,.66); background:rgba(11,16,23,.6); font-size:9px; font-weight:700; }
+  .camera-action:hover { border-color:rgba(215,255,72,.4); color:#d7ff48; background:rgba(215,255,72,.08); }
+  .camera-action kbd { border:1px solid rgba(255,255,255,.14); border-radius:.25rem; padding:.04rem .22rem; color:rgba(255,255,255,.38); font-size:8px; }
+  .snapshot-card { border:1px solid rgba(255,255,255,.09); border-radius:.7rem; padding:.55rem; background:rgba(255,255,255,.025); }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

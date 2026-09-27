@@ -37,4 +37,8 @@ describe("forge provider contracts", () => {
     if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
     await expect(appRouter.createCaller(createContext()).forge.cancelJob({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
+
+  it("rejects invalid snapshot project identifiers at the API boundary", async () => {
+    await expect(appRouter.createCaller(createContext()).snapshots.list({ projectId: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
 });
