@@ -9,6 +9,7 @@ export const DoodleCanvas = forwardRef<DoodleCanvasHandle>(function DoodleCanvas
   const [drawing, setDrawing] = useState(false);
   const [tool, setTool] = useState<"draw" | "erase">("draw");
   const [brush, setBrush] = useState(7);
+  const [color, setColor] = useState("#d7ff48");
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -53,7 +54,7 @@ export const DoodleCanvas = forwardRef<DoodleCanvasHandle>(function DoodleCanvas
     canvas?.setPointerCapture(event.pointerId);
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
-    ctx.strokeStyle = tool === "erase" ? "#111824" : "#d7ff48";
+    ctx.strokeStyle = tool === "erase" ? "#111824" : color;
     ctx.lineWidth = tool === "erase" ? brush * 2.3 : brush;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -75,7 +76,9 @@ export const DoodleCanvas = forwardRef<DoodleCanvasHandle>(function DoodleCanvas
         <div className="flex items-center gap-1">
           <Button size="icon" variant="ghost" className={tool === "draw" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/50"} onClick={() => setTool("draw")} aria-label="Draw"><RotateCcw className="h-3.5 w-3.5" /></Button>
           <Button size="icon" variant="ghost" className={tool === "erase" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/50"} onClick={() => setTool("erase")} aria-label="Erase"><Eraser className="h-3.5 w-3.5" /></Button>
-          <input aria-label="Brush size" type="range" min="2" max="24" value={brush} onChange={event => setBrush(Number(event.target.value))} className="ml-2 w-20 accent-[#d7ff48]" />
+          <input aria-label="Brush size" type="range" min="2" max="32" value={brush} onChange={event => setBrush(Number(event.target.value))} className="ml-2 w-20 accent-[#d7ff48]" />
+          <span className="text-[9px] text-white/35">{brush}px</span>
+          <input aria-label="Brush color" type="color" value={color} onChange={event => setColor(event.target.value)} className="ml-1 h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0" />
         </div>
         <Button size="icon" variant="ghost" className="text-white/45 hover:text-red-300" onClick={() => { const canvas = canvasRef.current; const ctx = canvas?.getContext("2d"); if (canvas && ctx) { ctx.fillStyle = "#111824"; ctx.fillRect(0, 0, canvas.width, canvas.height); } }} aria-label="Clear doodle"><Trash2 className="h-3.5 w-3.5" /></Button>
       </div>

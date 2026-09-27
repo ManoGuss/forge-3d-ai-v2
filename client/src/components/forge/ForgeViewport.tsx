@@ -22,7 +22,7 @@ type Props = {
   materialColor: string;
   environment: "studio" | "sunset" | "night";
   importedUrl?: string;
-  onSelectionChange?: (name: string, object?: THREE.Object3D) => void;
+  onSelectionChange?: (name: string, object?: THREE.Object3D, objects?: THREE.Object3D[]) => void;
   onTransformChange?: (object?: THREE.Object3D) => void;
   transformMode?: TransformMode;
 };
@@ -30,16 +30,18 @@ type Props = {
 type SceneState = {
   selected: string;
   selectedObject?: THREE.Object3D;
+  selectedObjects: THREE.Object3D[];
   mode: TransformMode;
   visible: boolean;
   showOutliner: boolean;
   setSelected: (value: string) => void;
   setSelectedObject: (value: THREE.Object3D) => void;
+  setSelectedObjects: (value: THREE.Object3D[]) => void;
   setMode: (value: TransformMode) => void;
   setVisible: (value: boolean) => void;
   setShowOutliner: (value: boolean) => void;
   onTransformChange?: (object?: THREE.Object3D) => void;
-  onSelectionChange?: (name: string, object?: THREE.Object3D) => void;
+  onSelectionChange?: (name: string, object?: THREE.Object3D, objects?: THREE.Object3D[]) => void;
 };
 
 function CyberneticExplorer({ wireframe, materialColor, scene }: Pick<Props, "wireframe" | "materialColor"> & { scene: SceneState }) {
@@ -48,7 +50,7 @@ function CyberneticExplorer({ wireframe, materialColor, scene }: Pick<Props, "wi
   const dark = useMemo(() => new THREE.MeshStandardMaterial({ color: "#151b25", metalness: 0.88, roughness: 0.2, wireframe }), [wireframe]);
   const glow = useMemo(() => new THREE.MeshStandardMaterial({ color: "#d7ff48", emissive: "#a8ce16", emissiveIntensity: 3.2, metalness: 0.2, roughness: 0.2, wireframe }), [wireframe]);
   useFrame(({ clock }) => { if (ring.current) ring.current.rotation.z = clock.getElapsedTime() * 0.45; });
-  const select = (event: { stopPropagation: () => void; object?: THREE.Object3D }, name: string) => { event.stopPropagation(); scene.setSelected(name); if (event.object) scene.setSelectedObject(event.object); scene.onSelectionChange?.(name, event.object); };
+  const select = (event: { stopPropagation: () => void; object?: THREE.Object3D; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }, name: string) => { event.stopPropagation(); if (!event.object) return; const additive = Boolean(event.shiftKey || event.ctrlKey || event.metaKey); const next = additive ? (scene.selectedObjects.some(item => item === event.object) ? scene.selectedObjects.filter(item => item !== event.object) : [...scene.selectedObjects, event.object]) : [event.object]; scene.setSelectedObjects(next); scene.setSelected(name); scene.setSelectedObject(next[0] ?? event.object); scene.onSelectionChange?.(next.length > 1 ? `${name} +${next.length - 1}` : name, next[0] ?? event.object, next); };
   const hidden = !scene.visible;
   return (
     <group position={[0, -0.75, 0]} visible={!hidden}>
@@ -70,10 +72,13 @@ function CyberneticExplorer({ wireframe, materialColor, scene }: Pick<Props, "wi
 
 function SceneContent({ wireframe, materialColor, importedUrl, scene }: Pick<Props, "wireframe" | "materialColor" | "importedUrl"> & { scene: SceneState }) {
   const selectedObject = useRef<THREE.Object3D>(null);
+  const selectionPivot = useRef<THREE.Group>(null);
+  useFrame(() => { if (!selectionPivot.current || scene.selectedObjects.length < 2) return; const center = new THREE.Vector3(); scene.selectedObjects.forEach(object => center.add(object.position)); center.multiplyScalar(1 / scene.selectedObjects.length); selectionPivot.current.position.copy(center); });
   return (
     <group ref={selectedObject}>
       {importedUrl ? <ImportedModel url={importedUrl} onSelect={() => scene.setSelected("Imported Model")} /> : <CyberneticExplorer wireframe={wireframe} materialColor={materialColor} scene={scene} />}
-      {scene.selected !== "Scene" && <TransformControls mode={scene.mode} object={scene.selectedObject} size={0.8} onObjectChange={() => scene.onTransformChange?.(scene.selectedObject)} />}
+      {scene.selected !== "Scene" && <TransformControls mode={scene.mode} object={scene.selectedObjects.length > 1 ? selectionPivot.current ?? undefined : scene.selectedObject} size={0.8} onObjectChange={() => scene.onTransformChange?.(scene.selectedObject)} />}
+      <group ref={selectionPivot} visible={false} />
     </group>
   );
 }
@@ -95,6 +100,7 @@ function downloadBlob(blob: Blob, filename: string) {
 export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function ForgeViewport({ wireframe, lightPower, materialColor, environment, importedUrl, onSelectionChange, onTransformChange, transformMode }, ref) {
   const [selected, setSelected] = useState("Scene");
   const [selectedObject, setSelectedObject] = useState<THREE.Object3D>();
+  const [selectedObjects, setSelectedObjects] = useState<THREE.Object3D[]>([]);
   const [mode, setMode] = useState<TransformMode>("translate");
   const [visible, setVisible] = useState(true);
   const [showOutliner, setShowOutliner] = useState(true);
@@ -102,7 +108,7 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
   const exportRoot = useRef<THREE.Group | null>(null);
   const sceneEnvironment = environment === "night" ? "night" : environment === "sunset" ? "sunset" : "studio";
   const activeMode = transformMode ?? mode;
-  const sceneState: SceneState = { selected, selectedObject, mode: activeMode, visible, showOutliner, setSelected, setSelectedObject, setMode, setVisible, setShowOutliner, onTransformChange, onSelectionChange };
+  const sceneState: SceneState = { selected, selectedObject, selectedObjects, mode: activeMode, visible, showOutliner, setSelected, setSelectedObject, setSelectedObjects, setMode, setVisible, setShowOutliner, onTransformChange, onSelectionChange };
 
   useImperativeHandle(ref, () => ({
     export: async (format: ExportFormat) => {
@@ -121,21 +127,21 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
       }
     },
     focusObject: () => controlsRef.current?.target?.set(0, 0, 0),
-    setTransform: (kind, axis, value) => { if (selectedObject) { selectedObject[kind][axis] = value; onTransformChange?.(selectedObject); } },
-  }), [selectedObject, onTransformChange]);
+    setTransform: (kind, axis, value) => { const targets = selectedObjects.length ? selectedObjects : selectedObject ? [selectedObject] : []; targets.forEach(object => { object[kind][axis] = value; }); onTransformChange?.(selectedObject); },
+  }), [selectedObject, selectedObjects, onTransformChange]);
 
   return (
     <div className="relative h-full min-h-[500px] w-full overflow-hidden rounded-[1.4rem] border border-white/10 bg-[#0b1017]">
-      <Canvas shadows dpr={[1, 1.6]} camera={{ position: [4.2, 2.6, 5.2], fov: 36 }} gl={{ antialias: true }}>
+      <Canvas shadows dpr={[1, 1.6]} camera={{ position: [5.8, 3.8, 7.6], fov: 42 }} gl={{ antialias: true }}>
         <color attach="background" args={["#0b1017"]} />
-        <PerspectiveCamera makeDefault position={[4.2, 2.6, 5.2]} fov={36} />
+        <PerspectiveCamera makeDefault position={[3.8, 2.3, 4.8]} fov={42} />
         <ambientLight intensity={0.45} />
         <directionalLight castShadow position={[3, 5, 4]} intensity={lightPower} color="#f2f5ff" shadow-mapSize={[2048, 2048]} />
         <pointLight position={[-3, 1, 2]} intensity={lightPower * 0.7} color="#b8d8ff" />
         <group ref={exportRoot}><SceneContent wireframe={wireframe} materialColor={materialColor} importedUrl={importedUrl} scene={sceneState} /></group>
         <Grid args={[12, 12]} cellSize={0.4} cellThickness={0.5} cellColor="#273142" sectionSize={2} sectionThickness={0.9} sectionColor="#3c4b5f" fadeDistance={14} infiniteGrid />
         <Environment preset={sceneEnvironment as "studio" | "sunset" | "night"} background={false} />
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} minDistance={2.8} maxDistance={10} target={[0, 0, 0]} />
+        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} minDistance={2.4} maxDistance={14} target={[0, -0.35, 0]} />
       </Canvas>
       <div className="absolute left-3 top-3 flex items-center gap-1 rounded-xl border border-white/10 bg-[#0b1017]/90 p-1.5 backdrop-blur">
         <Button size="icon" variant="ghost" className={mode === "translate" ? "bg-[#d7ff48]/15 text-[#d7ff48]" : "text-white/50"} onClick={() => setMode("translate")} title="Translate"><Move3D className="h-3.5 w-3.5" /></Button>
@@ -145,7 +151,7 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
         <Button size="icon" variant="ghost" className="text-white/50" onClick={() => setShowOutliner(value => !value)} title="Scene outliner"><SlidersHorizontal className="h-3.5 w-3.5" /></Button>
         <Button size="icon" variant="ghost" className="text-white/50" onClick={() => setVisible(value => !value)} title="Toggle visibility">{visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</Button>
       </div>
-      {showOutliner && <div className="absolute right-3 top-3 w-44 rounded-xl border border-white/10 bg-[#0b1017]/90 p-2 backdrop-blur"><div className="mb-2 flex items-center justify-between px-1 text-[9px] font-bold uppercase tracking-[.18em] text-white/35"><span>Scene</span><Box className="h-3 w-3" /></div>{["Scene", "Explorer Body", "Explorer Head", "Energy Pack", "Antenna Light"].map(item => <button key={item} onClick={() => setSelected(item)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[10px] ${selected === item ? "bg-[#d7ff48]/10 text-[#d7ff48]" : "text-white/45 hover:bg-white/5 hover:text-white/80"}`}><span className={`h-1.5 w-1.5 rounded-full ${selected === item ? "bg-[#d7ff48]" : "bg-white/20"}`} />{item}</button>)}</div>}
+      {showOutliner && <div className="absolute right-3 top-3 w-44 rounded-xl border border-white/10 bg-[#0b1017]/90 p-2 backdrop-blur"><div className="mb-2 flex items-center justify-between px-1 text-[9px] font-bold uppercase tracking-[.18em] text-white/35"><span>Scene {selectedObjects.length > 1 ? `· ${selectedObjects.length} selected` : ""}</span><Box className="h-3 w-3" /></div>{["Scene", "Explorer Body", "Explorer Head", "Energy Pack", "Antenna Light"].map(item => <button key={item} onClick={() => setSelected(item)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[10px] ${selected === item ? "bg-[#d7ff48]/10 text-[#d7ff48]" : "text-white/45 hover:bg-white/5 hover:text-white/80"}`}><span className={`h-1.5 w-1.5 rounded-full ${selected === item ? "bg-[#d7ff48]" : "bg-white/20"}`} />{item}</button>)}</div>}
       {selected !== "Scene" && <div className="absolute bottom-4 left-4 rounded-lg border border-[#d7ff48]/20 bg-[#0b1017]/90 px-3 py-2 text-[10px] text-white/65 backdrop-blur"><span className="font-bold text-[#d7ff48]">{selected}</span><span className="mx-2 text-white/20">•</span>{mode} gizmo active</div>}
       <div className="pointer-events-none absolute bottom-3 right-4 text-[10px] font-semibold uppercase tracking-[.22em] text-white/35">Orbit / pan / zoom</div>
     </div>
