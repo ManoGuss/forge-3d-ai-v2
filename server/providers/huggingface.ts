@@ -62,7 +62,7 @@ function findEndpoint(api: ApiInfo, kind: "image" | "3d", hasImage: boolean) {
   return ranked;
 }
 
-function valueFor(parameter: EndpointParameter, input: { prompt?: string; image?: string; style?: string; seed?: number; width?: number; height?: number }) {
+function valueFor(parameter: EndpointParameter, input: { prompt?: string; image?: string; style?: string; seed?: number; width?: number; height?: number; resolution?: string; quality?: string }) {
   const name = `${parameter.parameter_name ?? ""} ${parameter.label ?? ""}`.toLowerCase();
   if (name.includes("prompt") || name.includes("caption") || name.includes("description")) return [input.prompt ?? "" , input.style ? ` Direção visual: ${input.style}.` : ""].join("");
   if (parameter.component?.toLowerCase() === "image" || name === "image" || name.endsWith(" image") || name.includes("input image")) return input.image ? handle_file(input.image) : parameter.parameter_default ?? null;
@@ -70,11 +70,13 @@ function valueFor(parameter: EndpointParameter, input: { prompt?: string; image?
   if (name.includes("randomize")) return false;
   if (name.includes("width")) return input.width ?? parameter.parameter_default ?? 1024;
   if (name.includes("height")) return input.height ?? parameter.parameter_default ?? 1024;
+  if (name.includes("resolution") || name.includes("texture size")) return input.resolution ?? parameter.parameter_default ?? "1024";
   if (name.includes("steps") || name.includes("inference")) return parameter.parameter_default ?? 4;
   if (name.includes("guidance")) return parameter.parameter_default ?? 5;
   if (name.includes("octree")) return parameter.parameter_default ?? 256;
   if (name.includes("chunk")) return parameter.parameter_default ?? 8000;
   if (name.includes("background")) return parameter.parameter_default ?? true;
+  if (name.includes("quality") || name.includes("mode")) return input.quality ?? parameter.parameter_default ?? "Standard";
   return parameter.parameter_has_default ? parameter.parameter_default : null;
 }
 
@@ -131,12 +133,12 @@ export async function generateHuggingFaceConcept(input: { prompt: string; style:
   throw friendlyError(last ?? new Error("Nenhum Space de concept disponível"), space);
 }
 
-export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?: string; modelStyle?: string; materialPreset?: string }) {
+export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?: string; modelStyle?: string; materialPreset?: string; resolution?: string; quality?: string }) {
   const spaces = [process.env.THREED_SPACE, ...HF_3D_SPACES].filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
   let last: unknown;
   for (const space of spaces) {
     try {
-      const connection = await connect(space); const endpoint = findEndpoint(connection.api, "3d", Boolean(input.conceptUrl)); const image = await resolveInputUrl(input.conceptUrl); const generationPrompt = [input.prompt, input.modelStyle ? `Estilo 3D: ${input.modelStyle}.` : "", input.materialPreset ? `Material: ${input.materialPreset}.` : ""].filter(Boolean).join(" "); const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: generationPrompt, image, seed: 1234 }));
+      const connection = await connect(space); const endpoint = findEndpoint(connection.api, "3d", Boolean(input.conceptUrl)); const image = await resolveInputUrl(input.conceptUrl); const generationPrompt = [input.prompt, input.modelStyle ? `Estilo 3D: ${input.modelStyle}.` : "", input.materialPreset ? `Material: ${input.materialPreset}.` : "", input.resolution ? `Resolução alvo: ${input.resolution}.` : "", input.quality ? `Qualidade: ${input.quality}.` : ""].filter(Boolean).join(" "); const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: generationPrompt, image, seed: 1234, resolution: input.resolution, quality: input.quality }));
       const result = await runWithRetry(() => connection.client.predict(endpoint.name, data));
       const stored = await saveResult((result as { data?: unknown }).data, `generations/${Date.now()}/model.glb`, "model/gltf-binary");
       const jobId = `${space}:${Date.now()}`; const job = { provider: `huggingface-space:${space}`, jobId, status: "completed" as const, progress: 100 as const, stage: "Modelo 3D concluído no Space gratuito", modelUrl: stored.url }; completedJobs.set(jobId, job); return { ...job, endpoint: endpoint.name, space };

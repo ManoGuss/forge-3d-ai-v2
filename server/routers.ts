@@ -56,7 +56,7 @@ export const appRouter = router({
       }
     }),
     conceptStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => getLocalConceptStatus(input.jobId)),
-    generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string(), modelStyle: z.string().max(80).optional(), materialPreset: z.string().max(80).optional() })).mutation(async ({ input }) => {
+    generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string(), modelStyle: z.string().max(80).optional(), materialPreset: z.string().max(80).optional(), resolution: z.enum(["512", "1024", "1536"]).optional(), quality: z.enum(["Rápida", "Alta", "Máxima"]).optional() })).mutation(async ({ input }) => {
       await bootstrapAiEngines();
       try { return isHuggingFaceEnabled() ? await generateHuggingFace3D(input) : await (async () => { const provider = getThreeDProvider(); if (!provider) throw new Error("Motor Hunyuan3D indisponível. Tente novamente mais tarde."); return provider.generate(input); })(); } catch (error) { throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error ? error.message : "Falha ao iniciar a geração 3D" }); }
     }),
