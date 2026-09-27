@@ -1,7 +1,8 @@
 import { Client, handle_file } from "@gradio/client";
-import { storagePut } from "../storage";
+import { storageGetSignedUrl, storagePut } from "../storage";
 
 export const HF_IMAGE_SPACE = "black-forest-labs/FLUX.1-schnell";
+export const HF_IMAGE_REFERENCE_SPACE = "Akjava/flux1-schnell-img2img";
 export const HF_3D_SPACES = ["tencent/Hunyuan3D-2", "microsoft/TRELLIS.2"] as const;
 
 type EndpointParameter = { label?: string; parameter_name?: string; parameter_has_default?: boolean; parameter_default?: unknown; type?: string; component?: string };
@@ -21,6 +22,7 @@ function friendlyError(error: unknown, space: string) {
   if (lower.includes("sleep") || lower.includes("waking") || lower.includes("building") || lower.includes("queue")) return new Error("O motor gratuito de IA está acordando ou ocupado. Aguarde alguns instantes e tente novamente.");
   if (lower.includes("runtime") || lower.includes("space_error") || lower.includes("not found")) return new Error(`O Space gratuito ${space} está temporariamente indisponível. Tente novamente.`);
   if (lower.includes("timeout") || lower.includes("abort")) return new Error("O motor gratuito de IA demorou mais que o esperado. Tente novamente.");
+  if (lower === "an error occurred" || lower.includes("an error occurred")) return new Error(`O Space gratuito ${space} encontrou uma falha transitória. O fallback será tentado automaticamente; tente novamente em alguns instantes.`);
   return new Error(`Não foi possível usar o motor gratuito ${space}: ${message}`);
 }
 
@@ -52,18 +54,18 @@ function findEndpoint(api: ApiInfo, kind: "image" | "3d", hasImage: boolean) {
   const ranked = endpoints.map(([name, info]) => {
     const names = (info.parameters ?? []).map(item => `${item.parameter_name ?? ""} ${item.label ?? ""}`.toLowerCase()).join(" ");
     let score = 0;
-    if (kind === "image") { if (names.includes("prompt")) score += 8; if (names.includes("width")) score += 2; if (name.includes("infer")) score += 4; }
-    else { if (hasImage && names.includes("image")) score += 8; if (!hasImage && names.includes("caption")) score += 8; if (names.includes("octree")) score += 3; if (name.includes("generation_all")) score += 5; if (name.includes("shape_generation")) score += 4; }
+    if (kind === "image") { if (names.includes("prompt")) score += 8; if (hasImage && names.includes("image")) score += 10; if (names.includes("width")) score += 2; if (name.includes("infer")) score += 4; }
+    else { if (hasImage && names.includes("image")) score += 8; if (!hasImage && names.includes("caption")) score += 8; if (names.includes("octree")) score += 3; if (hasImage && name.includes("shape_generation")) score += 8; if (name.includes("generation_all")) score += 3; }
     return { name, info, score };
   }).sort((a, b) => b.score - a.score)[0];
-  if (!ranked || ranked.score < (kind === "image" ? 6 : 7)) throw new Error(`Nenhum endpoint compatível foi descoberto no Space ${kind}.`);
+  if (!ranked || ranked.score < (kind === "image" ? (hasImage ? 10 : 6) : 7)) throw new Error(`Nenhum endpoint compatível foi descoberto no Space ${kind}.`);
   return ranked;
 }
 
 function valueFor(parameter: EndpointParameter, input: { prompt?: string; image?: string; style?: string; seed?: number; width?: number; height?: number }) {
   const name = `${parameter.parameter_name ?? ""} ${parameter.label ?? ""}`.toLowerCase();
   if (name.includes("prompt") || name.includes("caption") || name.includes("description")) return [input.prompt ?? "" , input.style ? ` Direção visual: ${input.style}.` : ""].join("");
-  if (name === "image" || name.endsWith(" image") || name.includes("input image")) return input.image ? handle_file(input.image) : parameter.parameter_default ?? null;
+  if (parameter.component?.toLowerCase() === "image" || name === "image" || name.endsWith(" image") || name.includes("input image")) return input.image ? handle_file(input.image) : parameter.parameter_default ?? null;
   if (name.includes("seed")) return input.seed ?? parameter.parameter_default ?? 1234;
   if (name.includes("randomize")) return false;
   if (name.includes("width")) return input.width ?? parameter.parameter_default ?? 1024;
@@ -76,9 +78,19 @@ function valueFor(parameter: EndpointParameter, input: { prompt?: string; image?
   return parameter.parameter_has_default ? parameter.parameter_default : null;
 }
 
+async function resolveInputUrl(url?: string) {
+  if (!url) return undefined;
+  const storagePrefix = "/manus-storage/";
+  if (url.startsWith(storagePrefix)) return storageGetSignedUrl(url.slice(storagePrefix.length));
+  return url;
+}
+
 function allUrls(value: unknown): string[] {
   if (!value) return [];
-  if (typeof value === "string") return value.startsWith("data:") || value.startsWith("http") ? [value] : [];
+  if (typeof value === "string") {
+    if (value.startsWith("data:") || value.startsWith("http")) return [value];
+    return Array.from(value.matchAll(/https?:\/\/[^\s"'<>]+/g), match => match[0].replace(/[),.;]+$/, ""));
+  }
   if (Array.isArray(value)) return value.flatMap(allUrls);
   if (typeof value === "object") { const record = value as Record<string, unknown>; return [record.url, record.path].flatMap(item => typeof item === "string" ? [item] : []).concat(Object.values(record).flatMap(allUrls)); }
   return [];
@@ -105,28 +117,33 @@ export async function getHuggingFaceHealth() {
   return { image: { available: image.available, engine: "FLUX via Hugging Face Space", status: image.available ? "Space público conectado" : image.status ?? "Space indisponível", space: image.space, endpoints: image.endpoints }, threeD: { available: Boolean(selected3D?.available), engine: "Hunyuan3D/TRELLIS via Hugging Face Space", status: selected3D?.available ? "Space público conectado" : selected3D?.status ?? "Spaces indisponíveis", space: selected3D?.space, endpoints: selected3D?.endpoints } };
 }
 
-export async function generateHuggingFaceConcept(input: { prompt: string; style: string }) {
-  const space = process.env.IMAGE_SPACE || HF_IMAGE_SPACE;
-  try {
-    const connection = await connect(space); const endpoint = findEndpoint(connection.api, "image", false); const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: input.prompt, style: input.style, seed: 1234 }));
+export async function generateHuggingFaceConcept(input: { prompt: string; style: string; originalImages?: Array<{ url?: string; b64Json?: string; mimeType?: string }> }) {
+  const hasReference = Boolean(input.originalImages?.[0]?.url);
+  const spaces = [hasReference ? (process.env.IMAGE_REFERENCE_SPACE || HF_IMAGE_REFERENCE_SPACE) : undefined, process.env.IMAGE_SPACE || HF_IMAGE_SPACE].filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
+  let last: unknown;
+  for (const space of spaces) try {
+    const usingReferenceEndpoint = hasReference && space === (process.env.IMAGE_REFERENCE_SPACE || HF_IMAGE_REFERENCE_SPACE); const connection = await connect(space); const endpoint = findEndpoint(connection.api, "image", usingReferenceEndpoint); const image = usingReferenceEndpoint ? await resolveInputUrl(input.originalImages?.[0]?.url) : undefined; const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: input.prompt, style: input.style, image, seed: 1234 }));
     const result = await runWithRetry(() => connection.client.predict(endpoint.name, data));
     const stored = await saveResult((result as { data?: unknown }).data, `generations/${Date.now()}/concept.png`, "image/png");
-    return { provider: `huggingface-space:${space}`, status: "completed" as const, progress: 100, stage: "Concept concluído no Space gratuito", url: stored.url, endpoint: endpoint.name, space };
-  } catch (error) { throw friendlyError(error, space); }
+    return { provider: `huggingface-space:${space}`, status: "completed" as const, progress: 100, stage: hasReference ? "Concept baseado no doodle/referência concluído" : "Concept concluído no Space gratuito", url: stored.url, endpoint: endpoint.name, space };
+  } catch (error) { last = error; }
+  const space = spaces[0] ?? HF_IMAGE_SPACE;
+  throw friendlyError(last ?? new Error("Nenhum Space de concept disponível"), space);
 }
 
-export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?: string }) {
+export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?: string; modelStyle?: string; materialPreset?: string }) {
   const spaces = [process.env.THREED_SPACE, ...HF_3D_SPACES].filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
   let last: unknown;
   for (const space of spaces) {
     try {
-      const connection = await connect(space); const endpoint = findEndpoint(connection.api, "3d", Boolean(input.conceptUrl)); const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: input.prompt, image: input.conceptUrl, seed: 1234 }));
+      const connection = await connect(space); const endpoint = findEndpoint(connection.api, "3d", Boolean(input.conceptUrl)); const image = await resolveInputUrl(input.conceptUrl); const generationPrompt = [input.prompt, input.modelStyle ? `Estilo 3D: ${input.modelStyle}.` : "", input.materialPreset ? `Material: ${input.materialPreset}.` : ""].filter(Boolean).join(" "); const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: generationPrompt, image, seed: 1234 }));
       const result = await runWithRetry(() => connection.client.predict(endpoint.name, data));
       const stored = await saveResult((result as { data?: unknown }).data, `generations/${Date.now()}/model.glb`, "model/gltf-binary");
       const jobId = `${space}:${Date.now()}`; const job = { provider: `huggingface-space:${space}`, jobId, status: "completed" as const, progress: 100 as const, stage: "Modelo 3D concluído no Space gratuito", modelUrl: stored.url }; completedJobs.set(jobId, job); return { ...job, endpoint: endpoint.name, space };
     } catch (error) { last = error; }
   }
-  throw friendlyError(last ?? new Error("Nenhum Space 3D disponível"), spaces[0] ?? HF_3D_SPACES[0]);
+  const detail = last instanceof Error ? last.message : "falha desconhecida";
+  throw new Error(`Os Spaces gratuitos de geração 3D estão indisponíveis no momento. Hunyuan3D e fallback TRELLIS foram tentados. ${detail}`);
 }
 
 export function isHuggingFaceEnabled() { return process.env.DISABLE_HUGGINGFACE_SPACES !== "1"; }

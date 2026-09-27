@@ -47,7 +47,7 @@ export const appRouter = router({
       const enhancedPrompt = [input.prompt, `Direção visual: ${input.style}.`, "Concept para reconstrução 3D: objeto único, inteiro visível, centralizado, fundo neutro, iluminação de estúdio, sem texto e sem marca d'água."].join(" ");
       const generationId = await createForgeGeneration({ projectId: input.projectId, prompt: input.prompt, style: input.style, status: "pending", provider: isHuggingFaceEnabled() ? "huggingface-space" : "flux-local-gateway" });
       try {
-        const result = isHuggingFaceEnabled() ? await generateHuggingFaceConcept({ prompt: enhancedPrompt, style: input.style }) : await generateLocalConcept({ prompt: enhancedPrompt, style: input.style, originalImages: input.originalImages });
+        const result = isHuggingFaceEnabled() ? await generateHuggingFaceConcept({ prompt: enhancedPrompt, style: input.style, originalImages: input.originalImages }) : await generateLocalConcept({ prompt: enhancedPrompt, style: input.style, originalImages: input.originalImages });
         if (result.status === "completed" && result.url) await createForgeGeneration({ projectId: input.projectId, prompt: input.prompt, style: input.style, status: "completed", conceptUrl: result.url, provider: result.provider });
         return { ...result, enhancedPrompt, generationId };
       } catch (error) {
@@ -56,7 +56,7 @@ export const appRouter = router({
       }
     }),
     conceptStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => getLocalConceptStatus(input.jobId)),
-    generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string() })).mutation(async ({ input }) => {
+    generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string(), modelStyle: z.string().max(80).optional(), materialPreset: z.string().max(80).optional() })).mutation(async ({ input }) => {
       await bootstrapAiEngines();
       try { return isHuggingFaceEnabled() ? await generateHuggingFace3D(input) : await (async () => { const provider = getThreeDProvider(); if (!provider) throw new Error("Motor Hunyuan3D indisponível. Tente novamente mais tarde."); return provider.generate(input); })(); } catch (error) { throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error ? error.message : "Falha ao iniciar a geração 3D" }); }
     }),
