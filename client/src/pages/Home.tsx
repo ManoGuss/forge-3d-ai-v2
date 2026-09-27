@@ -12,9 +12,13 @@ import { trpc } from "@/lib/trpc";
 import { ArrowDownToLine, Box, ChevronDown, Clock3, Download, Eye, EyeOff, FolderOpen, History, ImagePlus, Layers3, Loader2, Menu, Move3D, Pause, Play, Plus, Redo2, Rotate3D, Save, Search, Send, Settings2, Sparkles, Square, Trash2, Undo2, Upload, WandSparkles, X } from "lucide-react";
 
 const styles = ["Realistic", "Stylized", "Low Poly", "Anime", "Fantasy", "Sci-Fi", "Cyberpunk", "Game Ready"];
+const STORAGE_KEY = "forge3d:workspace:v1";
 type Reference = { id: string; name: string; dataUrl: string; mimeType: string; uploadedUrl?: string };
 type JobHistory = { id: string; prompt: string; status: "queued" | "processing" | "completed" | "failed" | "cancelled"; progress: number; stage: string; createdAt: string; error?: string; conceptUrl?: string; modelUrl?: string };
 type TransformSnapshot = { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] };
+type PersistedWorkspace = { history?: JobHistory[]; transform?: TransformSnapshot };
+
+function readWorkspace(): PersistedWorkspace { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}"); } catch { return {}; } }
 
 function dataUrlToBase64(dataUrl: string) { return dataUrl.split(",")[1] ?? ""; }
 
@@ -35,8 +39,8 @@ export default function Home() {
   const [selectedName, setSelectedName] = useState("Scene");
   const [selectedObject, setSelectedObject] = useState<THREE.Object3D>();
   const [transformMode, setTransformMode] = useState<TransformMode>("translate");
-  const [transform, setTransform] = useState<TransformSnapshot>({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
-  const [history, setHistory] = useState<JobHistory[]>([]);
+  const [transform, setTransform] = useState<TransformSnapshot>(() => readWorkspace().transform ?? { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
+  const [history, setHistory] = useState<JobHistory[]>(() => readWorkspace().history ?? []);
   const [activeJobId, setActiveJobId] = useState<string>();
   const [showHistory, setShowHistory] = useState(true);
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -55,6 +59,9 @@ export default function Home() {
   const generate3D = trpc.forge.generate3D.useMutation();
   const cancelJob = trpc.forge.cancelJob.useMutation();
   const jobStatus = trpc.forge.jobStatus.useQuery({ jobId: activeJobId ?? "pending" }, { enabled: Boolean(activeJobId), refetchInterval: query => query.state.data?.status === "completed" || query.state.data?.status === "failed" || query.state.data?.status === "cancelled" ? false : 1200 });
+
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ history, transform })); } catch { /* local storage can be unavailable in private contexts */ } }, [history, transform]);
+  useEffect(() => { const latest = history[0]; if (latest?.conceptUrl && !conceptUrl) setConceptUrl(latest.conceptUrl); if (latest?.modelUrl && !importedUrl) { setImportedUrl(latest.modelUrl); setProgressiveModelUrl(latest.modelUrl); setStage("model"); } }, []);
 
   const snapshot = (object?: THREE.Object3D): TransformSnapshot => object ? { position: [object.position.x, object.position.y, object.position.z], rotation: [object.rotation.x, object.rotation.y, object.rotation.z], scale: [object.scale.x, object.scale.y, object.scale.z] } : transform;
   const updateTransform = (object?: THREE.Object3D) => { setSelectedObject(object); if (object) setTransform(snapshot(object)); };

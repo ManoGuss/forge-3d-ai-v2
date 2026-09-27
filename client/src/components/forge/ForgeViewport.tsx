@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, Grid, OrbitControls, PerspectiveCamera, TransformControls, useGLTF } from "@react-three/drei";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
@@ -109,6 +109,8 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
   const sceneEnvironment = environment === "night" ? "night" : environment === "sunset" ? "sunset" : "studio";
   const activeMode = transformMode ?? mode;
   const sceneState: SceneState = { selected, selectedObject, selectedObjects, mode: activeMode, visible, showOutliner, setSelected, setSelectedObject, setSelectedObjects, setMode, setVisible, setShowOutliner, onTransformChange, onSelectionChange };
+  const focusObject = () => { const source = exportRoot.current; const controls = controlsRef.current; const camera = controls?.object as THREE.PerspectiveCamera | undefined; if (!source || !controls || !camera) return; const bounds = new THREE.Box3().setFromObject(source); if (bounds.isEmpty()) return; const center = bounds.getCenter(new THREE.Vector3()); const size = bounds.getSize(new THREE.Vector3()); const distance = Math.max(size.length() * 1.35, 3.8); camera.position.copy(center.clone().add(new THREE.Vector3(1, 0.65, 1).normalize().multiplyScalar(distance))); camera.lookAt(center); controls.target.copy(center); controls.update(); };
+  useEffect(() => { const timer = window.setTimeout(focusObject, importedUrl ? 180 : 80); return () => window.clearTimeout(timer); }, [importedUrl]);
 
   useImperativeHandle(ref, () => ({
     export: async (format: ExportFormat) => {
@@ -126,7 +128,7 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
         downloadBlob(new Blob([result], { type: "application/octet-stream" }), "forge-cybernetic-explorer.fbx");
       }
     },
-    focusObject: () => controlsRef.current?.target?.set(0, 0, 0),
+    focusObject,
     setTransform: (kind, axis, value) => { const targets = selectedObjects.length ? selectedObjects : selectedObject ? [selectedObject] : []; targets.forEach(object => { object[kind][axis] = value; }); onTransformChange?.(selectedObject); },
   }), [selectedObject, selectedObjects, onTransformChange]);
 
@@ -152,7 +154,7 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
         <Button size="icon" variant="ghost" className="text-white/50" onClick={() => setVisible(value => !value)} title="Toggle visibility">{visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</Button>
       </div>
       {showOutliner && <div className="absolute right-3 top-3 w-44 rounded-xl border border-white/10 bg-[#0b1017]/90 p-2 backdrop-blur"><div className="mb-2 flex items-center justify-between px-1 text-[9px] font-bold uppercase tracking-[.18em] text-white/35"><span>Scene {selectedObjects.length > 1 ? `· ${selectedObjects.length} selected` : ""}</span><Box className="h-3 w-3" /></div>{["Scene", "Explorer Body", "Explorer Head", "Energy Pack", "Antenna Light"].map(item => <button key={item} onClick={() => setSelected(item)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[10px] ${selected === item ? "bg-[#d7ff48]/10 text-[#d7ff48]" : "text-white/45 hover:bg-white/5 hover:text-white/80"}`}><span className={`h-1.5 w-1.5 rounded-full ${selected === item ? "bg-[#d7ff48]" : "bg-white/20"}`} />{item}</button>)}</div>}
-      {selected !== "Scene" && <div className="absolute bottom-4 left-4 rounded-lg border border-[#d7ff48]/20 bg-[#0b1017]/90 px-3 py-2 text-[10px] text-white/65 backdrop-blur"><span className="font-bold text-[#d7ff48]">{selected}</span><span className="mx-2 text-white/20">•</span>{mode} gizmo active</div>}
+      {selected !== "Scene" && <div className="absolute bottom-4 left-4 rounded-lg border border-[#d7ff48]/20 bg-[#0b1017]/90 px-3 py-2 text-[10px] text-white/65 backdrop-blur"><span className="font-bold text-[#d7ff48]">{selectedObjects.length > 1 ? `GROUP · ${selectedObjects.length} OBJECTS` : selected}</span><span className="mx-2 text-white/20">•</span>{mode} gizmo active</div>}
       <div className="pointer-events-none absolute bottom-3 right-4 text-[10px] font-semibold uppercase tracking-[.22em] text-white/35">Orbit / pan / zoom</div>
     </div>
   );
