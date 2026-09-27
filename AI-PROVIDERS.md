@@ -29,6 +29,10 @@ THREE_D_DEFAULT_PROVIDER=tripo      # optional; defaults to tripo
 
 Never put `TRIPO_API_KEY` in `VITE_*` variables or client code. The browser calls our tRPC backend; only the backend calls Tripo.
 
+Before creating a task, the backend calls Tripo's documented account balance endpoint. If the available balance is zero, the API is not asked to create a task; the UI disables **Make 3D** and explains that no job or model was created.
+
+The `providers.status` response also reports the local engine state. This sandbox has no NVIDIA/CUDA runtime, so it reports TRELLIS.2 as unavailable instead of presenting a fake free-generation path. A future self-hosted worker can be connected through `THREE_D_WORKER_URL` after it is deployed on compatible Linux/NVIDIA hardware.
+
 ## Input mapping
 
 The `forge.generate3D` procedure accepts:

@@ -34,6 +34,7 @@ export interface ThreeDProvider {
   generate(input: ThreeDInput): Promise<ThreeDJob>;
   getStatus(jobId: string): Promise<ThreeDJob>;
   cancel(jobId: string): Promise<ThreeDJob>;
+  getCreditStatus?(): Promise<{ balance?: number; frozen?: number; available: boolean; message?: string }>;
 }
 
 const TRIPO_BASE_URL = "https://openapi.tripo3d.ai/v3";
@@ -108,8 +109,25 @@ class TripoProvider implements ThreeDProvider {
     return parsed.data;
   }
 
+  async getCreditStatus() {
+    const response = await fetch(`${TRIPO_BASE_URL}/account/balance`, { method: "GET", headers: this.headers() });
+    const body = await response.text();
+    if (!response.ok) return { available: false, message: `Tripo balance check failed (${response.status}).` };
+    try {
+      const parsed = JSON.parse(body) as { code?: number; data?: { balance?: number; frozen?: number }; message?: string };
+      if (parsed.code && parsed.code !== 0) return { available: false, message: parsed.message ?? "Tripo balance check failed." };
+      const balance = parsed.data?.balance ?? 0;
+      const frozen = parsed.data?.frozen ?? 0;
+      return { balance, frozen, available: balance > 0, message: balance > 0 ? undefined : "Tripo has no available credits. Connect a self-hosted engine or add Tripo credits." };
+    } catch {
+      return { available: false, message: "Tripo returned an invalid balance response." };
+    }
+  }
+
   async generate(input: ThreeDInput): Promise<ThreeDJob> {
     if (!this.configured) throw new Error("Tripo provider not configured. Add TRIPO_API_KEY as a server secret.");
+    const credits = await this.getCreditStatus();
+    if (!credits.available) throw new Error(credits.message ?? "Tripo has no available credits. No generation task was created.");
     const imageUrl = await inputUrlForProvider(input.conceptUrl);
     const faceLimit = polygonLimit(input.polygonCount);
     const quality = textureQuality(input.textureQuality);
@@ -230,6 +248,12 @@ export function getProviderStatus() {
       configured,
       model: tripoConfigured ? process.env.TRIPO_DEFAULT_MODEL || "v3.1-20260211" : undefined,
       capabilities: tripoConfigured ? ["text-to-3d", "image-to-3d", "glb", "pbr", "polling"] : [],
+    },
+    localEngine: {
+      configured: Boolean(process.env.THREE_D_WORKER_URL),
+      engine: process.env.THREE_D_LOCAL_ENGINE || "TRELLIS.2",
+      gpuAvailable: false,
+      status: process.env.THREE_D_WORKER_URL ? "Worker URL configured; runtime health is checked by the worker." : "No self-hosted worker configured. This sandbox has no NVIDIA/CUDA runtime.",
     },
     note: configured ? "3D generation uses a real configured provider and persists completed GLB files to project storage." : "Configure TRIPO_API_KEY on the server to enable real Tripo text-to-3D and image-to-3D generation. No fake model is created.",
   };

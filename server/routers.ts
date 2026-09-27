@@ -18,7 +18,14 @@ export const appRouter = router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => { const cookieOptions = getSessionCookieOptions(ctx.req); ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 }); return { success: true } as const; }),
   }),
-  providers: router({ status: publicProcedure.query(() => getProviderStatus()) }),
+  providers: router({
+    status: publicProcedure.query(() => getProviderStatus()),
+    credits: publicProcedure.query(async () => {
+      const provider = getThreeDProvider();
+      if (!provider?.getCreditStatus) return { available: false, message: "No credit-aware 3D provider is configured." };
+      return provider.getCreditStatus();
+    }),
+  }),
   projects: router({
     list: publicProcedure.query(({ ctx }) => listForgeProjects(ctx.user?.id)),
     create: publicProcedure.input(z.object({ name: z.string().min(1).max(180) })).mutation(async ({ ctx, input }) => {
@@ -56,8 +63,14 @@ export const appRouter = router({
     }),
     generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string() })).mutation(async ({ input }) => {
       const provider = getThreeDProvider();
-      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured. Add TRIPO_API_KEY as a server secret (or configure the legacy provider adapter). No fake model was created." });
-      return provider.generate(input);
+      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured. Add TRIPO_API_KEY as a server secret (or configure a self-hosted worker). No fake model was created." });
+      try {
+        return await provider.generate(input);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "3D generation could not start.";
+        if (/credit|balance|purchase more/i.test(message)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${message} No generation task was created.` });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
+      }
     }),
     jobStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input }) => {
       const provider = getThreeDProvider();

@@ -17,6 +17,8 @@ describe("forge provider contracts", () => {
     expect(result).not.toHaveProperty("apiKey");
     expect(result).not.toHaveProperty("endpoint");
     expect(typeof result.threeD.configured).toBe("boolean");
+    expect(result.localEngine.engine).toBe("TRELLIS.2");
+    expect(result.localEngine.gpuAvailable).toBe(false);
   });
 
   it("does not fabricate a 3D asset when no provider is configured", async () => {
