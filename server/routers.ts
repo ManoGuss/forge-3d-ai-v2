@@ -5,7 +5,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { createForgeGeneration, createForgeProject, createForgeSnapshot, deleteForgeSnapshot, listForgeProjects, listForgeSnapshots } from "./db";
-import { generateLocalConcept, isLocalImageConfigured } from "./providers/image";
+import { generateLocalConcept, getLocalConceptStatus, getLocalImageHealth, isLocalImageConfigured } from "./providers/image";
 import { getLocalEngineHealth, getProviderStatus, getThreeDProvider } from "./providers/threeD";
 import { storagePut } from "./storage";
 
@@ -20,7 +20,7 @@ export const appRouter = router({
   }),
   providers: router({
     status: publicProcedure.query(() => getProviderStatus()),
-    health: publicProcedure.query(() => getLocalEngineHealth()),
+    health: publicProcedure.query(async () => ({ image: await getLocalImageHealth(), threeD: await getLocalEngineHealth() })),
   }),
   projects: router({
     list: publicProcedure.query(({ ctx }) => listForgeProjects(ctx.user?.id)),
@@ -41,13 +41,14 @@ export const appRouter = router({
       const generationId = await createForgeGeneration({ projectId: input.projectId, prompt: input.prompt, style: input.style, status: "pending", provider: "flux-local-gateway" });
       try {
         const result = await generateLocalConcept({ prompt: enhancedPrompt, style: input.style, originalImages: input.originalImages });
-        await createForgeGeneration({ projectId: input.projectId, prompt: input.prompt, style: input.style, status: "completed", conceptUrl: result.url, provider: result.provider });
-        return { url: result.url, enhancedPrompt, generationId, provider: result.provider };
+        if (result.status === "completed" && result.url) await createForgeGeneration({ projectId: input.projectId, prompt: input.prompt, style: input.style, status: "completed", conceptUrl: result.url, provider: result.provider });
+        return { ...result, enhancedPrompt, generationId };
       } catch (error) {
         await createForgeGeneration({ projectId: input.projectId, prompt: input.prompt, style: input.style, status: "failed", provider: "flux-local-gateway", error: error instanceof Error ? error.message : "Falha no motor de concept local" });
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error ? error.message : "Falha no motor de concept local" });
       }
     }),
+    conceptStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => getLocalConceptStatus(input.jobId)),
     generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string() })).mutation(async ({ input }) => {
       const provider = getThreeDProvider();
       if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Motor Hunyuan3D local indisponível. Configure HUNYUAN3D_URL no servidor. Nenhum modelo foi criado." });

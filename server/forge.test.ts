@@ -17,9 +17,9 @@ describe("contratos do gateway local Forge", () => {
   it("reporta honestamente quando o motor Hunyuan3D não está configurado", async () => {
     if (process.env.HUNYUAN3D_URL) return;
     const result = await appRouter.createCaller(createContext()).providers.health();
-    expect(result.available).toBe(false);
-    expect(result.engine).toBe("Hunyuan3D-2.1");
-    expect(result.urlConfigured).toBe(false);
+    expect(result.threeD.available).toBe(false);
+    expect(result.threeD.engine).toBe("Hunyuan3D-2.1");
+    expect(result.threeD.urlConfigured).toBe(false);
   });
 
   it("não fabrica um modelo sem engine local configurado", async () => {
