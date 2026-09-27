@@ -27,4 +27,9 @@ describe("forge provider contracts", () => {
       textureQuality: "High",
     })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
+
+  it("does not poll a fabricated job when no provider is configured", async () => {
+    if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
+    await expect(appRouter.createCaller(createContext()).forge.jobStatus({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
 });
