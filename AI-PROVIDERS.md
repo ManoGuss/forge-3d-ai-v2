@@ -1,64 +1,45 @@
-# AI Providers
+# Engines locais do Forge3D
 
-## Provider boundaries
+## Princípio
 
-Forge keeps provider-specific code behind server-only adapters:
+O fluxo principal do Forge3D não depende de créditos, tokens ou APIs comerciais de geração. O navegador fala apenas com o backend do Forge; o backend conversa com engines locais/self-hosted configuráveis.
 
-- `ImageProvider` — backed by `server/_core/imageGeneration.ts` and Forge Image Service.
-- `ThreeDProvider` — selected by `getThreeDProvider()` in `server/providers/threeD.ts`.
-- Future boundaries: `AnimationProvider`, `AudioProvider`, `RiggingProvider`.
+## 3D: Hunyuan3D-2.1
 
-## Real 3D provider: Tripo v3
+O adapter `server/providers/threeD.ts` usa a API FastAPI documentada oficialmente pelo projeto Tencent Hunyuan3D-2.1:
 
-The default provider is **Tripo v3** when `TRIPO_API_KEY` is configured as a server secret. The integration uses the documented official endpoints:
+- `POST /send` inicia uma geração assíncrona.
+- `GET /status/{uid}` consulta o job.
+- `GET /health` verifica a infraestrutura.
 
-- `POST /v3/generation/text-to-model` for prompt-only generation.
-- `POST /v3/generation/image-to-model` for concept/reference generation.
-- `GET /v3/tasks/{task_id}` for asynchronous polling.
-- `GET /v3/account/balance` for credential health checks.
-
-The backend normalizes Tripo's `task_id`, `queued/running/success/failed/cancelled` states and `output.model_url` into the internal `ThreeDJob` contract. When a task succeeds, the server downloads the temporary Tripo GLB immediately and stores it with `storagePut()` under `models/tripo/`, so the viewer does not depend on Tripo's expiring URL.
-
-Configure only on the server:
+Configure no servidor:
 
 ```text
-TRIPO_API_KEY=...
-TRIPO_DEFAULT_MODEL=v3.1-20260211   # optional
-THREE_D_DEFAULT_PROVIDER=tripo      # optional; defaults to tripo
+HUNYUAN3D_URL=http://127.0.0.1:8081
 ```
 
-Never put `TRIPO_API_KEY` in `VITE_*` variables or client code. The browser calls our tRPC backend; only the backend calls Tripo.
+A entrada é uma imagem de referência em data URL, acompanhada do prompt e dos parâmetros de textura/contagem de faces. Ao concluir, o adapter salva o `model_base64` retornado como GLB no storage do projeto. Sem `HUNYUAN3D_URL`, a aplicação mostra “Motor Hunyuan3D local indisponível” e não fabrica um modelo.
 
-Before creating a task, the backend calls Tripo's documented account balance endpoint. If the available balance is zero, the API is not asked to create a task; the UI disables **Make 3D** and explains that no job or model was created.
+Requisitos oficiais publicados pelo projeto incluem Linux, Python 3.8+, CUDA e NVIDIA GPU com pelo menos 24 GB para Hunyuan3D-2.1 (confira o README do repositório antes de instalar). O sandbox atual não possui NVIDIA/CUDA, portanto não tenta instalar ou fingir uma inferência local.
 
-The `providers.status` response also reports the local engine state. This sandbox has no NVIDIA/CUDA runtime, so it reports TRELLIS.2 as unavailable instead of presenting a fake free-generation path. A future self-hosted worker can be connected through `THREE_D_WORKER_URL` after it is deployed on compatible Linux/NVIDIA hardware.
+## Concept: Flux/ComfyUI local
 
-## Input mapping
+O adapter `server/providers/image.ts` conversa com um gateway local de concept configurado por:
 
-The `forge.generate3D` procedure accepts:
-
-```json
-{
-  "prompt": "structured or user-authored 3D description",
-  "conceptUrl": "https://... or /manus-storage/...",
-  "polygonCount": "20K",
-  "textureQuality": "High"
-}
+```text
+IMAGE_ENGINE_URL=http://127.0.0.1:8188/forge/concept
+COMFYUI_URL=http://127.0.0.1:8188
+AI_ENGINE_URL=http://127.0.0.1:9000
 ```
 
-- With `conceptUrl`, the server uses Tripo image-to-model and passes the prompt as additional guidance.
-- Without `conceptUrl`, the server uses Tripo text-to-model.
-- Polygon strings are normalized to a safe `face_limit` range.
-- Texture quality is normalized to Tripo's documented `fast`, `standard`, `detailed` or `extreme` values.
+O gateway recebe `{ prompt, style, references, constraints }` e deve devolver `{ url }` ou `{ dataUrl }`. A interface não expõe nodes, CUDA ou parâmetros internos. Sem `IMAGE_ENGINE_URL`, o botão de concept fica indisponível com instrução administrativa clara.
 
-## Fallback and safety
+## Health e fallback
 
-The legacy `THREE_D_PROVIDER_URL` + `THREE_D_PROVIDER_API_KEY` adapter remains available as a compatibility fallback when Tripo is not selected. No provider configured means `PRECONDITION_FAILED`; the application never fabricates a model or placeholder success.
+`providers.health` chama o `/health` oficial do Hunyuan3D quando configurado e retorna engine, GPU, VRAM e status. Não existe fallback automático para Tripo, Meshy ou outro serviço pago.
 
-Tripo v3 does not expose a documented cancellation endpoint in the current task lifecycle API. The UI therefore reports cancellation failures honestly instead of pretending a task was cancelled.
+O código preserva os adapters de exportação, viewer 3D, snapshots, histórico, doodle, gizmos e banco de projetos. O foco da UI foi reduzido para uma única janela Forge com abas Criar, Desenhar, 3D, Efeitos e Projeto.
 
-## Tests
+## Licenças
 
-- `server/providers/threeD.credentials.test.ts` calls the lightweight official balance endpoint without logging or exposing the key.
-- `server/forge.test.ts` verifies readiness and the no-fake-generation guard.
-- Run `pnpm check && pnpm test && pnpm build` before delivery.
+Hunyuan3D-2.1 é distribuído pelo repositório oficial Tencent-Hunyuan. Verifique o arquivo de licença e os termos dos pesos antes de uso comercial ou redistribuição. Flux/ComfyUI deve ser instalado com pesos e licença compatíveis com o uso pretendido.

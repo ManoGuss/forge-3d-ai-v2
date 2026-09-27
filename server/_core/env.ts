@@ -7,4 +7,8 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  imageEngineUrl: process.env.IMAGE_ENGINE_URL ?? "",
+  comfyUiUrl: process.env.COMFYUI_URL ?? "",
+  hunyuan3dUrl: process.env.HUNYUAN3D_URL ?? "",
+  aiEngineUrl: process.env.AI_ENGINE_URL ?? "",
 };

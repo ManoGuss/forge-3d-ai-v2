@@ -2,45 +2,37 @@ import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
-function createContext(): TrpcContext {
-  return {
-    user: null,
-    req: {} as TrpcContext["req"],
-    res: {} as TrpcContext["res"],
-  };
-}
+function createContext(): TrpcContext { return { user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] }; }
 
-describe("forge provider contracts", () => {
-  it("reports provider readiness without exposing server credentials", async () => {
+describe("contratos do gateway local Forge", () => {
+  it("reporta engines locais sem expor segredos", async () => {
     const result = await appRouter.createCaller(createContext()).providers.status();
-    expect(result.image.id).toBe("forge-image-service");
+    expect(result.image.id).toBe("flux-local-gateway");
+    expect(result.threeD.id).toBe("hunyuan3d-local");
     expect(result).not.toHaveProperty("apiKey");
     expect(result).not.toHaveProperty("endpoint");
-    expect(typeof result.threeD.configured).toBe("boolean");
-    expect(result.localEngine.engine).toBe("TRELLIS.2");
-    expect(result.localEngine.gpuAvailable).toBe(false);
+    expect(result.note).toContain("engines locais");
   });
 
-  it("does not fabricate a 3D asset when no provider is configured", async () => {
-    if (process.env.TRIPO_API_KEY || (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY)) return;
-    await expect(appRouter.createCaller(createContext()).forge.generate3D({
-      prompt: "a compact sci-fi explorer robot",
-      polygonCount: "20K",
-      textureQuality: "High",
-    })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  it("reporta honestamente quando o motor Hunyuan3D não está configurado", async () => {
+    if (process.env.HUNYUAN3D_URL) return;
+    const result = await appRouter.createCaller(createContext()).providers.health();
+    expect(result.available).toBe(false);
+    expect(result.engine).toBe("Hunyuan3D-2.1");
+    expect(result.urlConfigured).toBe(false);
   });
 
-  it("does not poll a fabricated job when no provider is configured", async () => {
-    if (process.env.TRIPO_API_KEY || (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY)) return;
-    await expect(appRouter.createCaller(createContext()).forge.jobStatus({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  it("não fabrica um modelo sem engine local configurado", async () => {
+    if (process.env.HUNYUAN3D_URL) return;
+    await expect(appRouter.createCaller(createContext()).forge.generate3D({ prompt: "uma espada de cristal", polygonCount: "40K", textureQuality: "High" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
-  it("does not cancel a fabricated job when no provider is configured", async () => {
-    if (process.env.TRIPO_API_KEY || (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY)) return;
-    await expect(appRouter.createCaller(createContext()).forge.cancelJob({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  it("não fabrica um concept sem gateway de imagem local configurado", async () => {
+    if (process.env.IMAGE_ENGINE_URL) return;
+    await expect(appRouter.createCaller(createContext()).forge.generateConcept({ projectName: "Teste", prompt: "uma espada de cristal", style: "Pronto para jogo" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
-  it("rejects invalid snapshot project identifiers at the API boundary", async () => {
+  it("rejeita identificador inválido de snapshot na borda da API", async () => {
     await expect(appRouter.createCaller(createContext()).snapshots.list({ projectId: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

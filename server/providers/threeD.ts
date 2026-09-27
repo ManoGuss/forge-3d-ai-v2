@@ -1,5 +1,4 @@
-import { ENV } from "../_core/env";
-import { storageGetSignedUrl, storagePut } from "../storage";
+import { storagePut } from "../storage";
 
 type ThreeDInput = {
   prompt: string;
@@ -8,11 +7,12 @@ type ThreeDInput = {
   textureQuality?: string;
 };
 
-type TripoTask = {
-  task_id?: string;
+type HunyuanTask = {
+  uid?: string;
   status?: string;
   progress?: number;
-  output?: { model_url?: string; rendered_image_url?: string };
+  model_base64?: string;
+  model_url?: string;
   message?: string;
   error?: string;
 };
@@ -28,201 +28,121 @@ export type ThreeDJob = {
   error?: string;
 };
 
+export type LocalEngineHealth = {
+  available: boolean;
+  engine: string;
+  gpuAvailable: boolean;
+  vram: number;
+  status: string;
+  urlConfigured: boolean;
+};
+
 export interface ThreeDProvider {
   readonly id: string;
   readonly configured: boolean;
   generate(input: ThreeDInput): Promise<ThreeDJob>;
   getStatus(jobId: string): Promise<ThreeDJob>;
   cancel(jobId: string): Promise<ThreeDJob>;
-  getCreditStatus?(): Promise<{ balance?: number; frozen?: number; available: boolean; message?: string }>;
 }
 
-const TRIPO_BASE_URL = "https://openapi.tripo3d.ai/v3";
+const engineUrl = () => (process.env.HUNYUAN3D_URL ?? "").replace(/\/+$/, "");
 
-function polygonLimit(value?: string) {
+function faceCount(value?: string) {
   const parsed = Number.parseInt(value?.replace(/[^0-9]/g, "") ?? "", 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 20000;
-  return Math.min(Math.max(parsed, 500), 1500000);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 40000;
+  return Math.min(Math.max(parsed, 1000), 250000);
 }
 
-function textureQuality(value?: string): "fast" | "standard" | "detailed" | "extreme" {
-  const normalized = value?.toLowerCase();
-  if (normalized === "fast" || normalized === "detailed" || normalized === "extreme") return normalized;
-  return "standard";
+function imageDataUrl(value: string, mimeType = "image/png") {
+  return value.startsWith("data:") ? value : `data:${mimeType};base64,${value}`;
 }
 
-function providerError(response: Response, body: string) {
-  try {
-    const parsed = JSON.parse(body) as { message?: string; suggestion?: string };
-    return `${parsed.message ?? response.statusText}${parsed.suggestion ? ` ${parsed.suggestion}` : ""}`.trim();
-  } catch {
-    return body || response.statusText;
-  }
+async function referenceToDataUrl(value: string) {
+  if (value.startsWith("data:")) return value;
+  const response = await fetch(value);
+  if (!response.ok) throw new Error(`Não foi possível ler a referência visual (${response.status}).`);
+  const contentType = response.headers.get("content-type") || "image/png";
+  const bytes = Buffer.from(await response.arrayBuffer()).toString("base64");
+  return imageDataUrl(bytes, contentType);
 }
 
-async function inputUrlForProvider(value?: string) {
-  if (!value) return undefined;
-  if (/^https?:\/\//i.test(value)) return value;
-  const storagePrefix = "/manus-storage/";
-  if (value.startsWith(storagePrefix)) {
-    return storageGetSignedUrl(value.slice(storagePrefix.length));
-  }
-  throw new Error("The concept reference is not a public or project-storage URL.");
+function mapStatus(raw?: string): ThreeDJob["status"] {
+  const status = raw?.toLowerCase();
+  if (status === "completed" || status === "success" || status === "done") return "completed";
+  if (status === "failed" || status === "error") return "failed";
+  if (status === "cancelled" || status === "canceled") return "cancelled";
+  if (status === "queued" || status === "pending") return "queued";
+  return "processing";
 }
 
-class TripoProvider implements ThreeDProvider {
-  readonly id = "tripo";
+function stageFor(status: ThreeDJob["status"]) {
+  if (status === "queued") return "Na fila do motor local";
+  if (status === "processing") return "Gerando geometria e textura";
+  if (status === "completed") return "Modelo salvo no projeto";
+  if (status === "cancelled") return "Geração cancelada";
+  return "Falha no motor local";
+}
+
+class Hunyuan3DProvider implements ThreeDProvider {
+  readonly id = "hunyuan3d-local";
   readonly configured: boolean;
-  private readonly apiKey: string;
-  private readonly model: string;
   private readonly downloadedModels = new Map<string, string>();
 
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-    this.configured = Boolean(apiKey);
-    this.model = process.env.TRIPO_DEFAULT_MODEL || "v3.1-20260211";
-  }
-
-  private headers() {
-    return {
-      accept: "application/json",
-      "content-type": "application/json",
-      authorization: `Bearer ${this.apiKey}`,
-    };
+  constructor(private readonly baseUrl: string) {
+    this.configured = Boolean(baseUrl);
   }
 
   private async request(path: string, init?: RequestInit) {
-    const response = await fetch(`${TRIPO_BASE_URL}${path}`, {
+    const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
-      headers: { ...this.headers(), ...(init?.headers ?? {}) },
+      headers: { accept: "application/json", "content-type": "application/json", ...(init?.headers ?? {}) },
     });
     const body = await response.text();
-    if (!response.ok) throw new Error(`Tripo API ${response.status}: ${providerError(response, body)}`);
-    let parsed: { code?: number; data?: TripoTask; message?: string; suggestion?: string };
+    if (!response.ok) throw new Error(`Motor Hunyuan3D respondeu ${response.status}: ${body || response.statusText}`);
     try {
-      parsed = JSON.parse(body) as typeof parsed;
+      return JSON.parse(body) as HunyuanTask;
     } catch {
-      throw new Error("Tripo API returned invalid JSON.");
-    }
-    if (parsed.code && parsed.code !== 0) throw new Error(`Tripo API: ${parsed.message ?? "request failed"}${parsed.suggestion ? ` ${parsed.suggestion}` : ""}`);
-    if (!parsed.data) throw new Error("Tripo API returned no task data.");
-    return parsed.data;
-  }
-
-  async getCreditStatus() {
-    const response = await fetch(`${TRIPO_BASE_URL}/account/balance`, { method: "GET", headers: this.headers() });
-    const body = await response.text();
-    if (!response.ok) return { available: false, message: `Tripo balance check failed (${response.status}).` };
-    try {
-      const parsed = JSON.parse(body) as { code?: number; data?: { balance?: number; frozen?: number }; message?: string };
-      if (parsed.code && parsed.code !== 0) return { available: false, message: parsed.message ?? "Tripo balance check failed." };
-      const balance = parsed.data?.balance ?? 0;
-      const frozen = parsed.data?.frozen ?? 0;
-      return { balance, frozen, available: balance > 0, message: balance > 0 ? undefined : "Tripo has no available credits. Connect a self-hosted engine or add Tripo credits." };
-    } catch {
-      return { available: false, message: "Tripo returned an invalid balance response." };
+      throw new Error("O motor Hunyuan3D retornou uma resposta inválida.");
     }
   }
 
   async generate(input: ThreeDInput): Promise<ThreeDJob> {
-    if (!this.configured) throw new Error("Tripo provider not configured. Add TRIPO_API_KEY as a server secret.");
-    const credits = await this.getCreditStatus();
-    if (!credits.available) throw new Error(credits.message ?? "Tripo has no available credits. No generation task was created.");
-    const imageUrl = await inputUrlForProvider(input.conceptUrl);
-    const faceLimit = polygonLimit(input.polygonCount);
-    const quality = textureQuality(input.textureQuality);
-    const endpoint = imageUrl ? "/generation/image-to-model" : "/generation/text-to-model";
-    const payload = imageUrl
-      ? {
-          input: imageUrl,
-          model: this.model,
-          prompt: input.prompt || undefined,
-          face_limit: faceLimit,
-          texture: true,
-          pbr: true,
-          texture_quality: quality,
-          geometry_quality: quality === "extreme" || quality === "detailed" ? "detailed" : "standard",
-          enable_image_autofix: true,
-        }
-      : {
-          prompt: input.prompt,
-          model: this.model,
-          face_limit: faceLimit,
-          texture: true,
-          pbr: true,
-          texture_quality: quality,
-          geometry_quality: quality === "extreme" || quality === "detailed" ? "detailed" : "standard",
-        };
-    const task = await this.request(endpoint, { method: "POST", body: JSON.stringify(payload) });
-    if (!task.task_id) throw new Error("Tripo API returned no task_id.");
-    return {
-      provider: this.id,
-      jobId: task.task_id,
-      status: "queued",
-      progress: task.progress ?? 0,
-      stage: imageUrl ? "Image submitted to Tripo" : "Prompt submitted to Tripo",
-    };
+    if (!this.configured) throw new Error("Motor Hunyuan3D local indisponível. Configure HUNYUAN3D_URL no servidor.");
+    if (!input.conceptUrl) throw new Error("O Hunyuan3D local recebe uma imagem de referência. Gere ou envie um concept antes de criar o modelo 3D.");
+    const image = await referenceToDataUrl(input.conceptUrl);
+    const task = await this.request("/send", {
+      method: "POST",
+      body: JSON.stringify({
+        image,
+        remove_background: true,
+        texture: input.textureQuality !== "None",
+        seed: 1234,
+        face_count: faceCount(input.polygonCount),
+        type: "glb",
+        prompt: input.prompt,
+      }),
+    });
+    const jobId = task.uid;
+    if (!jobId) throw new Error("O motor Hunyuan3D não retornou um identificador de job.");
+    return { provider: this.id, jobId, status: "queued", progress: task.progress ?? 0, stage: "Enviado ao Hunyuan3D local" };
   }
 
   async getStatus(jobId: string): Promise<ThreeDJob> {
-    const task = await this.request(`/tasks/${encodeURIComponent(jobId)}`, { method: "GET" });
-    const rawStatus = task.status?.toLowerCase();
-    if (rawStatus === "success") {
-      const temporaryUrl = task.output?.model_url;
-      if (!temporaryUrl) return { provider: this.id, jobId, status: "failed", progress: 100, stage: "Validation failed", error: "Tripo completed without a model_url." };
-      const storedUrl = await this.persistModel(jobId, temporaryUrl);
-      return { provider: this.id, jobId, status: "completed", progress: 100, stage: "Model ready in project storage", modelUrl: storedUrl, thumbnailUrl: task.output?.rendered_image_url };
+    const task = await this.request(`/status/${encodeURIComponent(jobId)}`, { method: "GET" });
+    const status = mapStatus(task.status);
+    if (status === "completed") {
+      if (task.model_url) return { provider: this.id, jobId, status, progress: 100, stage: stageFor(status), modelUrl: task.model_url };
+      if (!task.model_base64) return { provider: this.id, jobId, status: "failed", progress: 100, stage: "Resposta sem modelo", error: "O Hunyuan3D concluiu sem devolver um GLB." };
+      const existing = this.downloadedModels.get(jobId);
+      const modelUrl = existing ?? (await storagePut(`models/hunyuan3d/${jobId}.glb`, Buffer.from(task.model_base64, "base64"), "model/gltf-binary")).url;
+      this.downloadedModels.set(jobId, modelUrl);
+      return { provider: this.id, jobId, status, progress: 100, stage: stageFor(status), modelUrl };
     }
-    if (rawStatus === "failed" || rawStatus === "banned" || rawStatus === "expired") {
-      return { provider: this.id, jobId, status: "failed", progress: task.progress ?? 0, stage: "Tripo generation failed", error: task.error ?? task.message ?? `Tripo task ended with status ${rawStatus}.` };
-    }
-    if (rawStatus === "cancelled") return { provider: this.id, jobId, status: "cancelled", progress: task.progress ?? 0, stage: "Cancelled" };
-    return { provider: this.id, jobId, status: "processing", progress: task.progress ?? 0, stage: rawStatus === "queued" ? "Queued at Tripo" : "Generating geometry and textures" };
-  }
-
-  private async persistModel(jobId: string, temporaryUrl: string) {
-    const existing = this.downloadedModels.get(jobId);
-    if (existing) return existing;
-    const response = await fetch(temporaryUrl);
-    if (!response.ok) throw new Error(`Tripo model download failed (${response.status}).`);
-    const data = new Uint8Array(await response.arrayBuffer());
-    if (!data.byteLength) throw new Error("Tripo returned an empty model file.");
-    const stored = await storagePut(`models/tripo/${jobId}.glb`, data, "model/gltf-binary");
-    this.downloadedModels.set(jobId, stored.url);
-    return stored.url;
+    return { provider: this.id, jobId, status, progress: task.progress ?? (status === "queued" ? 4 : 52), stage: stageFor(status), error: task.error ?? task.message };
   }
 
   async cancel(jobId: string): Promise<ThreeDJob> {
-    throw new Error(`Tripo cancellation is not exposed by the documented v3 task API for ${jobId}.`);
-  }
-}
-
-class HttpThreeDProvider implements ThreeDProvider {
-  readonly id = "http-3d-provider";
-  readonly configured = true;
-  constructor(private readonly endpoint: string, private readonly apiKey: string) {}
-  private headers() { return { accept: "application/json", "content-type": "application/json", authorization: `Bearer ${this.apiKey}` }; }
-  async generate(input: ThreeDInput): Promise<ThreeDJob> {
-    const response = await fetch(this.endpoint, { method: "POST", headers: this.headers(), body: JSON.stringify(input) });
-    const detail = await response.text();
-    if (!response.ok) throw new Error(`3D provider failed (${response.status}): ${detail || response.statusText}`);
-    const parsed = JSON.parse(detail) as Partial<ThreeDJob>;
-    if (!parsed.jobId) throw new Error("3D provider returned no jobId");
-    return { provider: this.id, jobId: parsed.jobId, modelUrl: parsed.modelUrl, status: parsed.status ?? "queued", progress: parsed.progress ?? 4, stage: parsed.stage ?? "Job accepted" };
-  }
-  async getStatus(jobId: string): Promise<ThreeDJob> {
-    const response = await fetch(`${this.endpoint.replace(/\/+$/, "")}/${encodeURIComponent(jobId)}`, { method: "GET", headers: this.headers() });
-    const detail = await response.text();
-    if (!response.ok) throw new Error(`3D status failed (${response.status}): ${detail || response.statusText}`);
-    const parsed = JSON.parse(detail) as Partial<ThreeDJob>;
-    return { provider: this.id, jobId, modelUrl: parsed.modelUrl, status: parsed.status ?? "processing", progress: parsed.progress ?? 50, stage: parsed.stage ?? "Processing geometry", error: parsed.error };
-  }
-  async cancel(jobId: string): Promise<ThreeDJob> {
-    const response = await fetch(`${this.endpoint.replace(/\/+$/, "")}/${encodeURIComponent(jobId)}`, { method: "DELETE", headers: this.headers() });
-    const detail = await response.text();
-    if (!response.ok) throw new Error(`3D cancel failed (${response.status}): ${detail || response.statusText}`);
-    const parsed = JSON.parse(detail || "{}") as Partial<ThreeDJob>;
-    return { provider: this.id, jobId, status: "cancelled", progress: parsed.progress ?? 0, stage: parsed.stage ?? "Cancelled" };
+    throw new Error(`O cancelamento não é exposto pela API oficial do Hunyuan3D para o job ${jobId}.`);
   }
 }
 
@@ -230,31 +150,30 @@ let cachedProvider: ThreeDProvider | null | undefined;
 
 export function getThreeDProvider(): ThreeDProvider | null {
   if (cachedProvider !== undefined) return cachedProvider;
-  const requested = (process.env.THREE_D_DEFAULT_PROVIDER || "tripo").toLowerCase();
-  if (requested === "tripo" && process.env.TRIPO_API_KEY) cachedProvider = new TripoProvider(process.env.TRIPO_API_KEY);
-  else if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) cachedProvider = new HttpThreeDProvider(process.env.THREE_D_PROVIDER_URL, process.env.THREE_D_PROVIDER_API_KEY);
-  else cachedProvider = null;
+  cachedProvider = engineUrl() ? new Hunyuan3DProvider(engineUrl()) : null;
   return cachedProvider;
 }
 
+export async function getLocalEngineHealth(): Promise<LocalEngineHealth> {
+  const url = engineUrl();
+  if (!url) return { available: false, engine: "Hunyuan3D-2.1", gpuAvailable: false, vram: 0, status: "Motor local não configurado", urlConfigured: false };
+  try {
+    const response = await fetch(`${url}/health`, { headers: { accept: "application/json" } });
+    const payload = (await response.json()) as { available?: boolean; gpuAvailable?: boolean; vram?: number; status?: string };
+    return { available: response.ok && payload.available !== false, engine: "Hunyuan3D-2.1", gpuAvailable: payload.gpuAvailable ?? true, vram: payload.vram ?? 0, status: payload.status ?? (response.ok ? "Motor local online" : "Motor local indisponível"), urlConfigured: true };
+  } catch {
+    return { available: false, engine: "Hunyuan3D-2.1", gpuAvailable: false, vram: 0, status: "Não foi possível conectar ao motor local", urlConfigured: true };
+  }
+}
+
 export function getProviderStatus() {
-  const tripoConfigured = Boolean(process.env.TRIPO_API_KEY);
-  const legacyConfigured = Boolean(process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY);
-  const configured = tripoConfigured || legacyConfigured;
+  const threeDConfigured = Boolean(engineUrl());
+  const imageConfigured = Boolean(process.env.IMAGE_ENGINE_URL);
   return {
-    image: { id: "forge-image-service", configured: Boolean(ENV.forgeApiUrl && ENV.forgeApiKey) },
-    threeD: {
-      id: tripoConfigured ? "tripo" : legacyConfigured ? "http-3d-provider" : "tripo",
-      configured,
-      model: tripoConfigured ? process.env.TRIPO_DEFAULT_MODEL || "v3.1-20260211" : undefined,
-      capabilities: tripoConfigured ? ["text-to-3d", "image-to-3d", "glb", "pbr", "polling"] : [],
-    },
-    localEngine: {
-      configured: Boolean(process.env.THREE_D_WORKER_URL),
-      engine: process.env.THREE_D_LOCAL_ENGINE || "TRELLIS.2",
-      gpuAvailable: false,
-      status: process.env.THREE_D_WORKER_URL ? "Worker URL configured; runtime health is checked by the worker." : "No self-hosted worker configured. This sandbox has no NVIDIA/CUDA runtime.",
-    },
-    note: configured ? "3D generation uses a real configured provider and persists completed GLB files to project storage." : "Configure TRIPO_API_KEY on the server to enable real Tripo text-to-3D and image-to-3D generation. No fake model is created.",
+    image: { id: "flux-local-gateway", configured: imageConfigured, capabilities: imageConfigured ? ["concept", "image-to-image"] : [] },
+    threeD: { id: "hunyuan3d-local", configured: threeDConfigured, capabilities: threeDConfigured ? ["image-to-3d", "glb", "polling"] : [] },
+    fx: { id: "local-fx", configured: false, capabilities: ["procedural-particles", "materials", "animation"] },
+    localEngine: { engine: "Hunyuan3D-2.1", urlConfigured: threeDConfigured, status: threeDConfigured ? "Configurado; aguardando health check" : "Motor local não configurado" },
+    note: "O Forge usa engines locais configuráveis. Nenhuma API comercial ou crédito por geração é usado pelo fluxo principal.",
   };
 }

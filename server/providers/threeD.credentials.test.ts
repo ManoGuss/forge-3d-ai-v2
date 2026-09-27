@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { getLocalEngineHealth, getProviderStatus } from "./threeD";
 
-describe("Tripo credentials", () => {
-  it("accepts the configured server key at the official balance endpoint", async () => {
-    const apiKey = process.env.TRIPO_API_KEY;
-    if (!apiKey) return;
+describe("gateway Hunyuan3D local", () => {
+  it("não expõe credenciais comerciais nem promete disponibilidade sem URL", () => {
+    const status = getProviderStatus();
+    expect(status.threeD.id).toBe("hunyuan3d-local");
+    expect(status).not.toHaveProperty("apiKey");
+    expect(status).not.toHaveProperty("billing");
+    if (!process.env.HUNYUAN3D_URL) expect(status.threeD.configured).toBe(false);
+  });
 
-    const response = await fetch("https://openapi.tripo3d.ai/v3/account/balance", {
-      headers: { Authorization: `Bearer ${apiKey}`, accept: "application/json" },
-    });
-    const body = (await response.json()) as { code?: number; message?: string };
-
-    expect(response.status, body.message ?? "Tripo credentials rejected").toBe(200);
-    expect(body.code).toBe(0);
-  }, 30000);
+  it("expõe health como indisponível quando nenhum worker local foi configurado", async () => {
+    if (process.env.HUNYUAN3D_URL) return;
+    const health = await getLocalEngineHealth();
+    expect(health).toMatchObject({ available: false, engine: "Hunyuan3D-2.1", urlConfigured: false });
+  });
 });
