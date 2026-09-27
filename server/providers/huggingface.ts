@@ -18,6 +18,10 @@ const CACHE_TTL = 10 * 60_000;
 const FAILURE_COOLDOWN = 2 * 60_000;
 const timeout = (ms: number) => AbortSignal.timeout(ms);
 
+export type ThreeDProviderDiagnostic = { provider: string; endpoint?: string; status?: number; error: string; retryable: boolean };
+
+function isTransientProviderError(error: unknown) { const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase(); return ["service unavailable", "an error occurred", "503", "502", "504", "429", "timeout", "abort", "queue", "connection", "overloaded"].some(marker => message.includes(marker)); }
+
 function friendlyError(error: unknown, space: string) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
@@ -81,8 +85,8 @@ function valueFor(parameter: EndpointParameter, input: { prompt?: string; image?
   if (name.includes("resolution") || name.includes("texture size")) return input.resolution ?? parameter.parameter_default ?? "1024";
   if (name.includes("steps") || name.includes("inference")) return parameter.parameter_default ?? 4;
   if (name.includes("guidance")) return parameter.parameter_default ?? 5;
-  if (name.includes("octree")) return parameter.parameter_default ?? 256;
-  if (name.includes("chunk")) return parameter.parameter_default ?? 8000;
+  if (name.includes("octree")) return input.resolution === "512" ? 128 : input.resolution === "1536" ? 384 : 256;
+  if (name.includes("chunk")) return input.quality === "Rápida" ? 2000 : input.quality === "Máxima" ? 16000 : parameter.parameter_default ?? 8000;
   if (name.includes("background")) return parameter.parameter_default ?? true;
   if (name.includes("quality") || name.includes("mode")) return input.quality ?? parameter.parameter_default ?? "Standard";
   return parameter.parameter_has_default ? parameter.parameter_default : null;
@@ -106,14 +110,59 @@ function allUrls(value: unknown): string[] {
   return [];
 }
 
+async function downloadBytes(url: string) {
+  const controller = new AbortController();
+  const hardTimeout = setTimeout(() => controller.abort(), 180_000);
+  try {
+    const response = await fetch(url, { signal: controller.signal, headers: { accept: "model/gltf-binary,application/octet-stream,*/*" } });
+    if (!response.ok) throw new Error(`Download do resultado retornou HTTP ${response.status}.`);
+    if (!response.body) throw new Error("Download do resultado retornou um corpo vazio.");
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    try {
+      while (true) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const read = await Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Timeout durante o download do GLB.")); }, 30_000); }),
+          ]);
+          if (read.done) break;
+          if (read.value) { const chunk = Buffer.from(read.value); chunks.push(chunk); total += chunk.length; }
+        } finally { if (timer) clearTimeout(timer); }
+      }
+    } catch (error) { await reader.cancel().catch(() => undefined); throw error; }
+    finally { reader.releaseLock(); }
+    return Buffer.concat(chunks, total);
+  } finally { clearTimeout(hardTimeout); controller.abort(); }
+}
+
 async function saveResult(value: unknown, key: string, mimeType: string) {
   const candidate = allUrls(value)[0];
   if (!candidate) throw new Error("O Space concluiu sem devolver um arquivo compatível.");
   let bytes: Buffer;
   if (candidate.startsWith("data:")) { const match = candidate.match(/^data:[^;]+;base64,(.+)$/); if (!match) throw new Error("Resultado data URL inválido."); bytes = Buffer.from(match[1], "base64"); }
   else if (candidate.startsWith("/") || candidate.startsWith("file:")) { bytes = await readFile(candidate.replace(/^file:\/\//, "")); }
-  else { const response = await fetch(candidate, { signal: timeout(120_000) }); if (!response.ok) throw new Error(`Não foi possível baixar o resultado do Space (${response.status}).`); bytes = Buffer.from(await response.arrayBuffer()); }
+  else {
+    let last: unknown;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const started = Date.now();
+        bytes = await downloadBytes(candidate);
+        console.info(`[Forge 3D] endpoint=result-download tentativa=${attempt} status=200 bytes=${bytes.length} tempoMs=${Date.now() - started}`);
+        break;
+      } catch (error) {
+        last = error;
+        console.warn(`[Forge 3D] endpoint=result-download tentativa=${attempt}/3 status=erro`);
+        if (!isTransientProviderError(error) || attempt === 3) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
+      }
+    }
+    if (!bytes!) throw last ?? new Error("Download do resultado não concluído.");
+  }
   if (!bytes.length) throw new Error("O Space retornou um arquivo vazio.");
+  if (mimeType === "model/gltf-binary" && bytes.subarray(0, 4).toString("ascii") !== "glTF") throw new Error("O Space retornou um arquivo que não é um GLB válido.");
   return storagePut(key, bytes, mimeType);
 }
 
@@ -137,7 +186,6 @@ async function generateTrellis2(connection: CachedConnection, image: string, inp
   return resultData(glb);
 }
 
-function isTransientProviderError(error: unknown) { const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase(); return ["service unavailable", "an error occurred", "503", "502", "504", "429", "timeout", "abort", "queue", "connection", "overloaded"].some(marker => message.includes(marker)); }
 async function runWithRetry<T>(task: () => Promise<T>, provider: string, endpoint = "unknown") { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) { const started = Date.now(); try { const result = await task(); console.info(`[Forge 3D] provider=${provider} endpoint=${endpoint} tentativa=${attempt + 1} status=ok tempoMs=${Date.now() - started}`); return result; } catch (error) { last = error; console.warn(`[Forge 3D] provider=${provider} endpoint=${endpoint} tentativa=${attempt + 1}/3 status=erro tempoMs=${Date.now() - started}`); if (!isTransientProviderError(error) || attempt === 2) break; await new Promise(resolve => setTimeout(resolve, 1200 * (attempt + 1))); } } throw last; }
 
 export async function inspectHuggingFaceSpace(space: string) { if (suppressed(space)) { const entry = unavailableSpaces.get(space); return { space, available: false, endpointCount: 0, endpoints: [], status: "Inferência temporariamente indisponível após falha recente" }; } try { const connection = await connect(space); return { space, available: true, endpointCount: Object.keys(connection.api.named_endpoints ?? {}).length, endpoints: Object.keys(connection.api.named_endpoints ?? {}) }; } catch (error) { return { space, available: false, endpointCount: 0, endpoints: [], status: error instanceof Error ? error.message : String(error) }; } }
@@ -167,6 +215,8 @@ export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?
   const spaces = [process.env.THREED_SPACE, ...HF_3D_SPACES].filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
   let last: unknown;
   let lastSpace = spaces[0] ?? HF_3D_SPACES[0];
+  const diagnostics: ThreeDProviderDiagnostic[] = [];
+  const requestId = `3d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   for (const space of spaces) {
     if (suppressed(space)) continue;
     lastSpace = space;
@@ -178,12 +228,24 @@ export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?
         : resultData(await runWithRetry(
           () => connection.client.predict(endpoint.name, parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: generationPrompt, image, seed: 1234, resolution: input.resolution, quality: input.quality }))),
           space,
+          endpoint.name,
         ));
       const stored = await saveResult(resultDataValue, `generations/${Date.now()}/model.glb`, "model/gltf-binary");
       unavailableSpaces.delete(space); const jobId = `${space}:${Date.now()}`; const job = { provider: `huggingface-space:${space}`, jobId, status: "completed" as const, progress: 100 as const, stage: "Malha, UV, materiais e texturas concluídos no Space gratuito", modelUrl: stored.url, assetManifest: { geometry: true, uvMap: true, pbrMaterials: true, embeddedTextures: true, rig: false, animations: false, particles: false, note: "Rig, animações e partículas só são incorporados quando o provider 3D expõe suporte nativo; o prompt foi enviado para tentar habilitá-los." } }; completedJobs.set(jobId, job); return { ...job, endpoint: endpoint.name, space };
-    } catch (error) { last = error; markUnavailable(space, error); console.warn(`[Forge 3D] Provider ${space} indisponível; tentando fallback:`, error instanceof Error ? error.message : error); }
+    } catch (error) {
+      last = error;
+      const providerError = error instanceof Error ? error.message : String(error);
+      const status = providerError.match(/\b(401|403|404|408|429|500|502|503|504)\b/)?.[1];
+      diagnostics.push({ provider: space, endpoint: space === "microsoft/TRELLIS.2" ? "/image_to_3d → /extract_glb" : "/shape_generation", status: status ? Number(status) : undefined, error: providerError, retryable: isTransientProviderError(error) });
+      markUnavailable(space, error);
+      console.warn(`[Forge 3D] Provider ${space} indisponível; tentando fallback:`, providerError);
+    }
   }
-  throw friendlyError(last ?? new Error("provider_unavailable"), lastSpace);
+  const providerError = last instanceof Error ? last.message : String(last ?? "provider_unavailable");
+  const finalError = friendlyError(last ?? new Error("provider_unavailable"), lastSpace);
+  Object.assign(finalError, { code: "3D_GENERATION_FAILED", provider: lastSpace, status: Number(providerError.match(/\b(401|403|404|408|429|500|502|503|504)\b/)?.[1] ?? 503), retryable: isTransientProviderError(last), providerError, requestId, diagnostics });
+  console.error("[Forge 3D] generation_failed", JSON.stringify({ requestId, code: "3D_GENERATION_FAILED", provider: lastSpace, providerError, retryable: isTransientProviderError(last), diagnostics }));
+  throw finalError;
 }
 
 export function isHuggingFaceEnabled() { return process.env.DISABLE_HUGGINGFACE_SPACES !== "1"; }
