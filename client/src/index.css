@@ -110,6 +110,13 @@ button:active { transform: scale(.97); }
   .forge-select:focus { outline:1px solid rgba(215,255,72,.45); }
   .small-action { display:flex; align-items:center; justify-content:center; gap:.35rem; border:1px solid rgba(255,255,255,.08); border-radius:.7rem; padding:.6rem .4rem; color:rgba(255,255,255,.48); background:rgba(255,255,255,.02); font-size:10px; font-weight:700; }
   .small-action:hover { border-color:rgba(215,255,72,.3); color:#d7ff48; background:rgba(215,255,72,.04); }
+  .tool-pill, .gizmo-pill { display:inline-flex; align-items:center; gap:.35rem; border:1px solid rgba(255,255,255,.09); border-radius:.55rem; padding:.42rem .58rem; color:rgba(255,255,255,.5); background:rgba(255,255,255,.025); font-size:10px; font-weight:700; }
+  .tool-pill:hover, .gizmo-pill:hover, .gizmo-pill-active { border-color:rgba(215,255,72,.35); color:#d7ff48; background:rgba(215,255,72,.07); }
+  .result-tab { border-radius:.5rem; padding:.45rem .7rem; color:rgba(255,255,255,.35); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+  .result-tab-active { background:rgba(255,255,255,.1); color:#fff; }
+  .inspector-input { width:100%; border:1px solid rgba(255,255,255,.09); border-radius:.55rem; padding:.48rem .35rem; color:rgba(255,255,255,.8); background:#111824; font-size:11px; font-family:"DM Mono", monospace; }
+  .inspector-input:focus { outline:1px solid rgba(215,255,72,.55); }
+  .history-action { display:inline-flex; align-items:center; gap:.25rem; border:1px solid rgba(255,255,255,.08); border-radius:.45rem; padding:.3rem .45rem; background:rgba(255,255,255,.03); font-size:9px; font-weight:800; }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

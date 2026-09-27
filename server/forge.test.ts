@@ -32,4 +32,9 @@ describe("forge provider contracts", () => {
     if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
     await expect(appRouter.createCaller(createContext()).forge.jobStatus({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
+
+  it("does not cancel a fabricated job when no provider is configured", async () => {
+    if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
+    await expect(appRouter.createCaller(createContext()).forge.cancelJob({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
 });

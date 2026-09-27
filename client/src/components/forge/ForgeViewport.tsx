@@ -13,6 +13,7 @@ export type ExportFormat = "glb" | "obj" | "fbx";
 export type ForgeViewportHandle = {
   export: (format: ExportFormat) => Promise<void>;
   focusObject: () => void;
+  setTransform: (kind: "position" | "rotation" | "scale", axis: "x" | "y" | "z", value: number) => void;
 };
 
 type Props = {
@@ -21,6 +22,9 @@ type Props = {
   materialColor: string;
   environment: "studio" | "sunset" | "night";
   importedUrl?: string;
+  onSelectionChange?: (name: string, object?: THREE.Object3D) => void;
+  onTransformChange?: (object?: THREE.Object3D) => void;
+  transformMode?: TransformMode;
 };
 
 type SceneState = {
@@ -34,6 +38,8 @@ type SceneState = {
   setMode: (value: TransformMode) => void;
   setVisible: (value: boolean) => void;
   setShowOutliner: (value: boolean) => void;
+  onTransformChange?: (object?: THREE.Object3D) => void;
+  onSelectionChange?: (name: string, object?: THREE.Object3D) => void;
 };
 
 function CyberneticExplorer({ wireframe, materialColor, scene }: Pick<Props, "wireframe" | "materialColor"> & { scene: SceneState }) {
@@ -42,7 +48,7 @@ function CyberneticExplorer({ wireframe, materialColor, scene }: Pick<Props, "wi
   const dark = useMemo(() => new THREE.MeshStandardMaterial({ color: "#151b25", metalness: 0.88, roughness: 0.2, wireframe }), [wireframe]);
   const glow = useMemo(() => new THREE.MeshStandardMaterial({ color: "#d7ff48", emissive: "#a8ce16", emissiveIntensity: 3.2, metalness: 0.2, roughness: 0.2, wireframe }), [wireframe]);
   useFrame(({ clock }) => { if (ring.current) ring.current.rotation.z = clock.getElapsedTime() * 0.45; });
-  const select = (event: { stopPropagation: () => void; object?: THREE.Object3D }, name: string) => { event.stopPropagation(); scene.setSelected(name); if (event.object) scene.setSelectedObject(event.object); };
+  const select = (event: { stopPropagation: () => void; object?: THREE.Object3D }, name: string) => { event.stopPropagation(); scene.setSelected(name); if (event.object) scene.setSelectedObject(event.object); scene.onSelectionChange?.(name, event.object); };
   const hidden = !scene.visible;
   return (
     <group position={[0, -0.75, 0]} visible={!hidden}>
@@ -67,7 +73,7 @@ function SceneContent({ wireframe, materialColor, importedUrl, scene }: Pick<Pro
   return (
     <group ref={selectedObject}>
       {importedUrl ? <ImportedModel url={importedUrl} onSelect={() => scene.setSelected("Imported Model")} /> : <CyberneticExplorer wireframe={wireframe} materialColor={materialColor} scene={scene} />}
-      {scene.selected !== "Scene" && <TransformControls mode={scene.mode} object={scene.selectedObject} size={0.8} />}
+      {scene.selected !== "Scene" && <TransformControls mode={scene.mode} object={scene.selectedObject} size={0.8} onObjectChange={() => scene.onTransformChange?.(scene.selectedObject)} />}
     </group>
   );
 }
@@ -86,7 +92,7 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(href);
 }
 
-export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function ForgeViewport({ wireframe, lightPower, materialColor, environment, importedUrl }, ref) {
+export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function ForgeViewport({ wireframe, lightPower, materialColor, environment, importedUrl, onSelectionChange, onTransformChange, transformMode }, ref) {
   const [selected, setSelected] = useState("Scene");
   const [selectedObject, setSelectedObject] = useState<THREE.Object3D>();
   const [mode, setMode] = useState<TransformMode>("translate");
@@ -94,8 +100,9 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
   const [showOutliner, setShowOutliner] = useState(true);
   const controlsRef = useRef<any>(null);
   const exportRoot = useRef<THREE.Group | null>(null);
-  const sceneState: SceneState = { selected, selectedObject, mode, visible, showOutliner, setSelected, setSelectedObject, setMode, setVisible, setShowOutliner };
   const sceneEnvironment = environment === "night" ? "night" : environment === "sunset" ? "sunset" : "studio";
+  const activeMode = transformMode ?? mode;
+  const sceneState: SceneState = { selected, selectedObject, mode: activeMode, visible, showOutliner, setSelected, setSelectedObject, setMode, setVisible, setShowOutliner, onTransformChange, onSelectionChange };
 
   useImperativeHandle(ref, () => ({
     export: async (format: ExportFormat) => {
@@ -114,7 +121,8 @@ export const ForgeViewport = forwardRef<ForgeViewportHandle, Props>(function For
       }
     },
     focusObject: () => controlsRef.current?.target?.set(0, 0, 0),
-  }), []);
+    setTransform: (kind, axis, value) => { if (selectedObject) { selectedObject[kind][axis] = value; onTransformChange?.(selectedObject); } },
+  }), [selectedObject, onTransformChange]);
 
   return (
     <div className="relative h-full min-h-[500px] w-full overflow-hidden rounded-[1.4rem] border border-white/10 bg-[#0b1017]">

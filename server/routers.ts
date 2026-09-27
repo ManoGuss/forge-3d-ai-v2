@@ -59,6 +59,11 @@ export const appRouter = router({
       if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured." });
       return provider.getStatus(input.jobId);
     }),
+    cancelJob: publicProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input }) => {
+      const provider = getThreeDProvider();
+      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured." });
+      return provider.cancel(input.jobId);
+    }),
   }),
 });
 
