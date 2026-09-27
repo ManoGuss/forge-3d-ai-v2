@@ -1,4 +1,5 @@
 import { Client, handle_file } from "@gradio/client";
+import { readFile } from "node:fs/promises";
 import { storageGetSignedUrl, storagePut } from "../storage";
 
 export const HF_IMAGE_SPACE = "black-forest-labs/FLUX.1-schnell";
@@ -110,13 +111,34 @@ async function saveResult(value: unknown, key: string, mimeType: string) {
   if (!candidate) throw new Error("O Space concluiu sem devolver um arquivo compatível.");
   let bytes: Buffer;
   if (candidate.startsWith("data:")) { const match = candidate.match(/^data:[^;]+;base64,(.+)$/); if (!match) throw new Error("Resultado data URL inválido."); bytes = Buffer.from(match[1], "base64"); }
+  else if (candidate.startsWith("/") || candidate.startsWith("file:")) { bytes = await readFile(candidate.replace(/^file:\/\//, "")); }
   else { const response = await fetch(candidate, { signal: timeout(120_000) }); if (!response.ok) throw new Error(`Não foi possível baixar o resultado do Space (${response.status}).`); bytes = Buffer.from(await response.arrayBuffer()); }
   if (!bytes.length) throw new Error("O Space retornou um arquivo vazio.");
   return storagePut(key, bytes, mimeType);
 }
 
+function resultData(result: unknown) { return (result as { data?: unknown })?.data; }
+
+async function generateTrellis2(connection: CachedConnection, image: string, input: { resolution?: string; quality?: string }) {
+  const api = connection.api;
+  const start = api.named_endpoints?.["/start_session"];
+  if (start) await runWithRetry(() => connection.client.predict("/start_session", []), "microsoft/TRELLIS.2/session", "/start_session");
+  const endpoint = api.named_endpoints?.["/image_to_3d"];
+  if (!endpoint) throw new Error("O Space TRELLIS.2 não expõe /image_to_3d.");
+  const generationData = (endpoint.parameters ?? []).map(parameter => valueFor(parameter, { image, seed: 1234, resolution: input.resolution ?? "512", quality: input.quality }));
+  const preview = await runWithRetry(() => connection.client.predict("/image_to_3d", generationData), "microsoft/TRELLIS.2/image_to_3d", "/image_to_3d");
+  const previewData = resultData(preview);
+  const state = Array.isArray(previewData) ? previewData[0] : undefined;
+  if (!state || typeof state !== "object") throw new Error("TRELLIS.2 concluiu a geração, mas não devolveu o estado do modelo para extração GLB.");
+  const extract = api.named_endpoints?.["/extract_glb"];
+  if (!extract) throw new Error("O Space TRELLIS.2 não expõe /extract_glb.");
+  const extractData = (extract.parameters ?? []).map((parameter, index) => index === 0 ? state : valueFor(parameter, { resolution: input.resolution ?? "1024", quality: input.quality }));
+  const glb = await runWithRetry(() => connection.client.predict("/extract_glb", extractData), "microsoft/TRELLIS.2/extract_glb", "/extract_glb");
+  return resultData(glb);
+}
+
 function isTransientProviderError(error: unknown) { const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase(); return ["service unavailable", "an error occurred", "503", "502", "504", "429", "timeout", "abort", "queue", "connection", "overloaded"].some(marker => message.includes(marker)); }
-async function runWithRetry<T>(task: () => Promise<T>, provider: string) { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) { try { return await task(); } catch (error) { last = error; console.warn(`[Forge 3D] ${provider} falhou na tentativa ${attempt + 1}/3:`, error instanceof Error ? error.message : error); if (!isTransientProviderError(error) || attempt === 2) break; await new Promise(resolve => setTimeout(resolve, 1200 * (attempt + 1))); } } throw last; }
+async function runWithRetry<T>(task: () => Promise<T>, provider: string, endpoint = "unknown") { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) { const started = Date.now(); try { const result = await task(); console.info(`[Forge 3D] provider=${provider} endpoint=${endpoint} tentativa=${attempt + 1} status=ok tempoMs=${Date.now() - started}`); return result; } catch (error) { last = error; console.warn(`[Forge 3D] provider=${provider} endpoint=${endpoint} tentativa=${attempt + 1}/3 status=erro tempoMs=${Date.now() - started}`); if (!isTransientProviderError(error) || attempt === 2) break; await new Promise(resolve => setTimeout(resolve, 1200 * (attempt + 1))); } } throw last; }
 
 export async function inspectHuggingFaceSpace(space: string) { if (suppressed(space)) { const entry = unavailableSpaces.get(space); return { space, available: false, endpointCount: 0, endpoints: [], status: "Inferência temporariamente indisponível após falha recente" }; } try { const connection = await connect(space); return { space, available: true, endpointCount: Object.keys(connection.api.named_endpoints ?? {}).length, endpoints: Object.keys(connection.api.named_endpoints ?? {}) }; } catch (error) { return { space, available: false, endpointCount: 0, endpoints: [], status: error instanceof Error ? error.message : String(error) }; } }
 
@@ -149,9 +171,15 @@ export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?
     if (suppressed(space)) continue;
     lastSpace = space;
     try {
-      const connection = await connect(space); const endpoint = findEndpoint(connection.api, "3d", Boolean(input.conceptUrl)); const image = await resolveInputUrl(input.conceptUrl); const generationPrompt = [input.prompt, input.modelStyle ? `Estilo 3D: ${input.modelStyle}.` : "", input.materialPreset ? `Material: ${input.materialPreset}.` : "", input.resolution ? `Resolução alvo: ${input.resolution}.` : "", input.quality ? `Qualidade: ${input.quality}.` : "", "Entregar asset de jogo completo: malha limpa, UV map, materiais PBR e texturas incorporadas no GLB; se o Space suportar, incluir rig, animações e efeitos descritos no prompt. Não incluir texto, marca d'água ou objetos extras."].filter(Boolean).join(" "); const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: generationPrompt, image, seed: 1234, resolution: input.resolution, quality: input.quality }));
-      const result = await runWithRetry(() => connection.client.predict(endpoint.name, data), space);
-      const stored = await saveResult((result as { data?: unknown }).data, `generations/${Date.now()}/model.glb`, "model/gltf-binary");
+      const connection = await connect(space); const image = await resolveInputUrl(input.conceptUrl); if (!image) throw new Error("O concept não possui uma URL acessível pelo backend."); const generationPrompt = [input.prompt, input.modelStyle ? `Estilo 3D: ${input.modelStyle}.` : "", input.materialPreset ? `Material: ${input.materialPreset}.` : "", input.resolution ? `Resolução alvo: ${input.resolution}.` : "", input.quality ? `Qualidade: ${input.quality}.` : "", "Entregar asset de jogo completo: malha limpa, UV map, materiais PBR e texturas incorporadas no GLB; se o Space suportar, incluir rig, animações e efeitos descritos no prompt. Não incluir texto, marca d'água ou objetos extras."].filter(Boolean).join(" ");
+      const endpoint = findEndpoint(connection.api, "3d", true);
+      const resultDataValue = space === "microsoft/TRELLIS.2"
+        ? await generateTrellis2(connection, image, input)
+        : resultData(await runWithRetry(
+          () => connection.client.predict(endpoint.name, parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: generationPrompt, image, seed: 1234, resolution: input.resolution, quality: input.quality }))),
+          space,
+        ));
+      const stored = await saveResult(resultDataValue, `generations/${Date.now()}/model.glb`, "model/gltf-binary");
       unavailableSpaces.delete(space); const jobId = `${space}:${Date.now()}`; const job = { provider: `huggingface-space:${space}`, jobId, status: "completed" as const, progress: 100 as const, stage: "Malha, UV, materiais e texturas concluídos no Space gratuito", modelUrl: stored.url, assetManifest: { geometry: true, uvMap: true, pbrMaterials: true, embeddedTextures: true, rig: false, animations: false, particles: false, note: "Rig, animações e partículas só são incorporados quando o provider 3D expõe suporte nativo; o prompt foi enviado para tentar habilitá-los." } }; completedJobs.set(jobId, job); return { ...job, endpoint: endpoint.name, space };
     } catch (error) { last = error; markUnavailable(space, error); console.warn(`[Forge 3D] Provider ${space} indisponível; tentando fallback:`, error instanceof Error ? error.message : error); }
   }

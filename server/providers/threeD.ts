@@ -65,6 +65,11 @@ async function safeJsonResponse<T>(response: Response, label: string): Promise<T
   try { return JSON.parse(body) as T; } catch { throw new Error(`${label} retornou JSON inválido.`); }
 }
 
+function retryableHttpError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\((502|503|504)\)|\b(502|503|504)\b|timed out|timeout|aborted/i.test(message);
+}
+
 async function referenceToDataUrl(value: string) {
   if (value.startsWith("data:")) return value;
   const response = await fetch(value);
@@ -101,11 +106,26 @@ class Hunyuan3DProvider implements ThreeDProvider {
   }
 
   private async request(path: string, init?: RequestInit) {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: { accept: "application/json", "content-type": "application/json", ...(init?.headers ?? {}) },
-    });
-    return safeJsonResponse<HunyuanTask>(response, "Motor Hunyuan3D");
+    let last: unknown;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const started = Date.now();
+      try {
+        const response = await fetch(`${this.baseUrl}${path}`, {
+          ...init,
+          signal: init?.signal ?? AbortSignal.timeout(120_000),
+          headers: { accept: "application/json", "content-type": "application/json", ...(init?.headers ?? {}) },
+        });
+        const result = await safeJsonResponse<HunyuanTask>(response, "Motor Hunyuan3D");
+        console.info(`[Forge 3D] provider=${this.id} endpoint=${path} tentativa=${attempt} status=${response.status} tempoMs=${Date.now() - started}`);
+        return result;
+      } catch (error) {
+        last = error;
+        console.warn(`[Forge 3D] provider=${this.id} endpoint=${path} tentativa=${attempt}/3 status=erro tempoMs=${Date.now() - started}`);
+        if (!retryableHttpError(error) || attempt === 3) break;
+        await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
+      }
+    }
+    throw last;
   }
 
   async generate(input: ThreeDInput): Promise<ThreeDJob> {
