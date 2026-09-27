@@ -12,7 +12,9 @@ type CachedConnection = { client: Client; api: ApiInfo; connectedAt: number };
 
 const connections = new Map<string, Promise<CachedConnection>>();
 const completedJobs = new Map<string, { provider: string; jobId: string; status: "completed"; progress: 100; stage: string; modelUrl?: string; error?: string }>();
+const unavailableSpaces = new Map<string, { until: number; reason: string }>();
 const CACHE_TTL = 10 * 60_000;
+const FAILURE_COOLDOWN = 2 * 60_000;
 const timeout = (ms: number) => AbortSignal.timeout(ms);
 
 function friendlyError(error: unknown, space: string) {
@@ -22,10 +24,12 @@ function friendlyError(error: unknown, space: string) {
   if (lower.includes("sleep") || lower.includes("waking") || lower.includes("building") || lower.includes("queue")) return new Error("O motor gratuito de IA está acordando ou ocupado. Aguarde alguns instantes e tente novamente.");
   if (lower.includes("runtime") || lower.includes("space_error") || lower.includes("not found")) return new Error(`O Space gratuito ${space} está temporariamente indisponível. Tente novamente.`);
   if (lower.includes("timeout") || lower.includes("abort")) return new Error("O motor gratuito de IA demorou mais que o esperado. Tente novamente.");
-  if (lower.includes("service unavailable") || lower.includes("unexpected token 's'") || lower.includes('unexpected token "s"')) return new Error(`O Space gratuito ${space} respondeu temporariamente com Service Unavailable. O Forge tentou novamente e acionará o fallback gratuito; tente novamente em alguns instantes.`);
-  if (lower === "an error occurred" || lower.includes("an error occurred")) return new Error(`O Space gratuito ${space} encontrou uma falha transitória. O fallback será tentado automaticamente; tente novamente em alguns instantes.`);
-  return new Error(`Não foi possível usar o motor gratuito ${space}: ${message}`);
+  if (lower.includes("service unavailable") || lower.includes("unexpected token 's'") || lower.includes('unexpected token "s"') || lower === "an error occurred" || lower.includes("an error occurred") || lower.includes("502") || lower.includes("503") || lower.includes("504")) return new Error("O serviço de geração 3D está temporariamente indisponível. Os motores gratuitos foram tentados; tente novamente em alguns minutos.");
+  return new Error(`Não foi possível concluir a geração 3D gratuita no momento. Tente novamente mais tarde.`);
 }
+
+function suppressed(space: string) { const entry = unavailableSpaces.get(space); if (!entry) return false; if (entry.until <= Date.now()) { unavailableSpaces.delete(space); return false; } return true; }
+function markUnavailable(space: string, error: unknown) { unavailableSpaces.set(space, { until: Date.now() + FAILURE_COOLDOWN, reason: error instanceof Error ? error.message : String(error) }); }
 
 async function connect(space: string) {
   const current = connections.get(space);
@@ -66,7 +70,9 @@ function findEndpoint(api: ApiInfo, kind: "image" | "3d", hasImage: boolean) {
 function valueFor(parameter: EndpointParameter, input: { prompt?: string; image?: string; style?: string; seed?: number; width?: number; height?: number; resolution?: string; quality?: string }) {
   const name = `${parameter.parameter_name ?? ""} ${parameter.label ?? ""}`.toLowerCase();
   if (name.includes("prompt") || name.includes("caption") || name.includes("description")) return [input.prompt ?? "" , input.style ? ` Direção visual: ${input.style}.` : ""].join("");
-  if (parameter.component?.toLowerCase() === "image" || name === "image" || name.endsWith(" image") || name.includes("input image")) return input.image ? handle_file(input.image) : parameter.parameter_default ?? null;
+  const parameterName = (parameter.parameter_name ?? "").toLowerCase();
+  const isPrimaryImage = parameterName === "image" || name === "image" || name.endsWith(" input image");
+  if (isPrimaryImage) return input.image ? handle_file(input.image) : parameter.parameter_default ?? null;
   if (name.includes("seed")) return input.seed ?? parameter.parameter_default ?? 1234;
   if (name.includes("randomize")) return false;
   if (name.includes("width")) return input.width ?? parameter.parameter_default ?? 1024;
@@ -109,9 +115,10 @@ async function saveResult(value: unknown, key: string, mimeType: string) {
   return storagePut(key, bytes, mimeType);
 }
 
-async function runWithRetry<T>(task: () => Promise<T>) { let last: unknown; for (let attempt = 0; attempt < 4; attempt += 1) { try { return await task(); } catch (error) { last = error; if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1400 * (attempt + 1))); } } throw last; }
+function isTransientProviderError(error: unknown) { const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase(); return ["service unavailable", "an error occurred", "503", "502", "504", "429", "timeout", "abort", "queue", "connection", "overloaded"].some(marker => message.includes(marker)); }
+async function runWithRetry<T>(task: () => Promise<T>, provider: string) { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) { try { return await task(); } catch (error) { last = error; console.warn(`[Forge 3D] ${provider} falhou na tentativa ${attempt + 1}/3:`, error instanceof Error ? error.message : error); if (!isTransientProviderError(error) || attempt === 2) break; await new Promise(resolve => setTimeout(resolve, 1200 * (attempt + 1))); } } throw last; }
 
-export async function inspectHuggingFaceSpace(space: string) { try { const connection = await connect(space); return { space, available: true, endpointCount: Object.keys(connection.api.named_endpoints ?? {}).length, endpoints: Object.keys(connection.api.named_endpoints ?? {}) }; } catch (error) { return { space, available: false, endpointCount: 0, endpoints: [], status: error instanceof Error ? error.message : String(error) }; } }
+export async function inspectHuggingFaceSpace(space: string) { if (suppressed(space)) { const entry = unavailableSpaces.get(space); return { space, available: false, endpointCount: 0, endpoints: [], status: "Inferência temporariamente indisponível após falha recente" }; } try { const connection = await connect(space); return { space, available: true, endpointCount: Object.keys(connection.api.named_endpoints ?? {}).length, endpoints: Object.keys(connection.api.named_endpoints ?? {}) }; } catch (error) { return { space, available: false, endpointCount: 0, endpoints: [], status: error instanceof Error ? error.message : String(error) }; } }
 
 export async function getHuggingFaceHealth() {
   const image = await inspectHuggingFaceSpace(process.env.IMAGE_SPACE || HF_IMAGE_SPACE);
@@ -126,7 +133,7 @@ export async function generateHuggingFaceConcept(input: { prompt: string; style:
   let last: unknown;
   for (const space of spaces) try {
     const usingReferenceEndpoint = hasReference && space === (process.env.IMAGE_REFERENCE_SPACE || HF_IMAGE_REFERENCE_SPACE); const connection = await connect(space); const endpoint = findEndpoint(connection.api, "image", usingReferenceEndpoint); const image = usingReferenceEndpoint ? await resolveInputUrl(input.originalImages?.[0]?.url) : undefined; const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: input.prompt, style: input.style, image, seed: 1234 }));
-    const result = await runWithRetry(() => connection.client.predict(endpoint.name, data));
+    const result = await runWithRetry(() => connection.client.predict(endpoint.name, data), space);
     const stored = await saveResult((result as { data?: unknown }).data, `generations/${Date.now()}/concept.png`, "image/png");
     return { provider: `huggingface-space:${space}`, status: "completed" as const, progress: 100, stage: hasReference ? "Concept baseado no doodle/referência concluído" : "Concept concluído no Space gratuito", url: stored.url, endpoint: endpoint.name, space };
   } catch (error) { last = error; }
@@ -137,16 +144,18 @@ export async function generateHuggingFaceConcept(input: { prompt: string; style:
 export async function generateHuggingFace3D(input: { prompt: string; conceptUrl?: string; modelStyle?: string; materialPreset?: string; resolution?: string; quality?: string }) {
   const spaces = [process.env.THREED_SPACE, ...HF_3D_SPACES].filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
   let last: unknown;
+  let lastSpace = spaces[0] ?? HF_3D_SPACES[0];
   for (const space of spaces) {
+    if (suppressed(space)) continue;
+    lastSpace = space;
     try {
       const connection = await connect(space); const endpoint = findEndpoint(connection.api, "3d", Boolean(input.conceptUrl)); const image = await resolveInputUrl(input.conceptUrl); const generationPrompt = [input.prompt, input.modelStyle ? `Estilo 3D: ${input.modelStyle}.` : "", input.materialPreset ? `Material: ${input.materialPreset}.` : "", input.resolution ? `Resolução alvo: ${input.resolution}.` : "", input.quality ? `Qualidade: ${input.quality}.` : "", "Entregar asset de jogo completo: malha limpa, UV map, materiais PBR e texturas incorporadas no GLB; se o Space suportar, incluir rig, animações e efeitos descritos no prompt. Não incluir texto, marca d'água ou objetos extras."].filter(Boolean).join(" "); const data = parameters(connection.api, endpoint.name).map(parameter => valueFor(parameter, { prompt: generationPrompt, image, seed: 1234, resolution: input.resolution, quality: input.quality }));
-      const result = await runWithRetry(() => connection.client.predict(endpoint.name, data));
+      const result = await runWithRetry(() => connection.client.predict(endpoint.name, data), space);
       const stored = await saveResult((result as { data?: unknown }).data, `generations/${Date.now()}/model.glb`, "model/gltf-binary");
-      const jobId = `${space}:${Date.now()}`; const job = { provider: `huggingface-space:${space}`, jobId, status: "completed" as const, progress: 100 as const, stage: "Malha, UV, materiais e texturas concluídos no Space gratuito", modelUrl: stored.url, assetManifest: { geometry: true, uvMap: true, pbrMaterials: true, embeddedTextures: true, rig: false, animations: false, particles: false, note: "Rig, animações e partículas só são incorporados quando o provider 3D expõe suporte nativo; o prompt foi enviado para tentar habilitá-los." } }; completedJobs.set(jobId, job); return { ...job, endpoint: endpoint.name, space };
-    } catch (error) { last = error; }
+      unavailableSpaces.delete(space); const jobId = `${space}:${Date.now()}`; const job = { provider: `huggingface-space:${space}`, jobId, status: "completed" as const, progress: 100 as const, stage: "Malha, UV, materiais e texturas concluídos no Space gratuito", modelUrl: stored.url, assetManifest: { geometry: true, uvMap: true, pbrMaterials: true, embeddedTextures: true, rig: false, animations: false, particles: false, note: "Rig, animações e partículas só são incorporados quando o provider 3D expõe suporte nativo; o prompt foi enviado para tentar habilitá-los." } }; completedJobs.set(jobId, job); return { ...job, endpoint: endpoint.name, space };
+    } catch (error) { last = error; markUnavailable(space, error); console.warn(`[Forge 3D] Provider ${space} indisponível; tentando fallback:`, error instanceof Error ? error.message : error); }
   }
-  const detail = last instanceof Error ? last.message : "falha desconhecida";
-  throw new Error(`Os Spaces gratuitos de geração 3D estão indisponíveis no momento. Hunyuan3D e fallback TRELLIS foram tentados. ${detail}`);
+  throw friendlyError(last ?? new Error("provider_unavailable"), lastSpace);
 }
 
 export function isHuggingFaceEnabled() { return process.env.DISABLE_HUGGINGFACE_SPACES !== "1"; }

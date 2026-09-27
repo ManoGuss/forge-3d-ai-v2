@@ -57,6 +57,14 @@ function imageDataUrl(value: string, mimeType = "image/png") {
   return value.startsWith("data:") ? value : `data:${mimeType};base64,${value}`;
 }
 
+async function safeJsonResponse<T>(response: Response, label: string): Promise<T> {
+  const contentType = response.headers.get("content-type") || "";
+  const body = await response.text();
+  if (!response.ok) throw new Error(`${label} indisponível (${response.status}).`);
+  if (!contentType.toLowerCase().includes("application/json")) throw new Error(`${label} retornou uma resposta não-JSON.`);
+  try { return JSON.parse(body) as T; } catch { throw new Error(`${label} retornou JSON inválido.`); }
+}
+
 async function referenceToDataUrl(value: string) {
   if (value.startsWith("data:")) return value;
   const response = await fetch(value);
@@ -97,13 +105,7 @@ class Hunyuan3DProvider implements ThreeDProvider {
       ...init,
       headers: { accept: "application/json", "content-type": "application/json", ...(init?.headers ?? {}) },
     });
-    const body = await response.text();
-    if (!response.ok) throw new Error(`Motor Hunyuan3D respondeu ${response.status}: ${body || response.statusText}`);
-    try {
-      return JSON.parse(body) as HunyuanTask;
-    } catch {
-      throw new Error("O motor Hunyuan3D retornou uma resposta inválida.");
-    }
+    return safeJsonResponse<HunyuanTask>(response, "Motor Hunyuan3D");
   }
 
   async generate(input: ThreeDInput): Promise<ThreeDJob> {
@@ -165,7 +167,7 @@ export async function getLocalEngineHealth(): Promise<LocalEngineHealth> {
   if (!url) return { available: false, engine: "Hunyuan3D-2.1", gpuAvailable: false, vram: 0, status: "Motor local não configurado", urlConfigured: false };
   try {
     const response = await fetch(`${url}/health`, { headers: { accept: "application/json" } });
-    const payload = (await response.json()) as { available?: boolean; gpuAvailable?: boolean; vram?: number; status?: string };
+    const payload = await safeJsonResponse<{ available?: boolean; gpuAvailable?: boolean; vram?: number; status?: string }>(response, "Health do Hunyuan3D");
     return { available: response.ok && payload.available !== false, engine: "Hunyuan3D-2.1", gpuAvailable: payload.gpuAvailable ?? true, vram: payload.vram ?? 0, status: payload.status ?? (response.ok ? "Motor local online" : "Motor local indisponível"), urlConfigured: true };
   } catch {
     return { available: false, engine: "Hunyuan3D-2.1", gpuAvailable: false, vram: 0, status: "Não foi possível conectar ao motor local", urlConfigured: true };
