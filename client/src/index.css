@@ -125,7 +125,8 @@ button:active { transform: scale(.97); }
   .snapshot-card { border:1px solid rgba(255,255,255,.09); border-radius:.7rem; padding:.55rem; background:rgba(255,255,255,.025); }
   .hud-close { display:grid; height:1.65rem; width:1.65rem; place-items:center; border:1px solid rgba(255,255,255,.1); border-radius:999px; color:rgba(255,255,255,.45); background:rgba(255,255,255,.04); font-size:1rem; line-height:1; }
   .hud-close:hover { border-color:rgba(215,255,72,.4); color:#d7ff48; background:rgba(215,255,72,.08); }
-  .floating-bubbles { position:absolute; left:50%; top:1rem; z-index:25; display:flex; transform:translateX(-50%); gap:.4rem; border:1px solid rgba(255,255,255,.12); border-radius:999px; padding:.35rem; background:rgba(11,16,23,.82); box-shadow:0 10px 30px rgba(0,0,0,.26); backdrop-filter:blur(16px); }
+  .floating-bubbles { position:absolute; left:50%; top:1rem; z-index:25; display:flex; max-width:calc(100% - 1.5rem); overflow-x:auto; transform:translateX(-50%); gap:.4rem; border:1px solid rgba(255,255,255,.12); border-radius:999px; padding:.35rem; background:rgba(11,16,23,.82); box-shadow:0 10px 30px rgba(0,0,0,.26); backdrop-filter:blur(16px); scrollbar-width:none; }
+  .floating-bubbles::-webkit-scrollbar { display:none; }
   .floating-bubble { border:1px solid transparent; border-radius:999px; padding:.45rem .7rem; color:rgba(255,255,255,.45); background:transparent; font-size:9px; font-weight:900; letter-spacing:.08em; }
   .floating-bubble:hover, .floating-bubble-active { border-color:rgba(215,255,72,.35); color:#d7ff48; background:rgba(215,255,72,.1); }
   .doodle-ai-panel { position:absolute; left:50%; top:5.2rem; z-index:24; width:min(720px,calc(100% - 2rem)); transform:translateX(-50%); border:1px solid rgba(255,255,255,.16); border-radius:1.15rem; padding:1rem; background:rgba(11,16,23,.9); box-shadow:0 24px 70px rgba(0,0,0,.42); backdrop-filter:blur(20px); }
@@ -148,6 +149,7 @@ button:active { transform: scale(.97); }
   .hud-drag-handle:active { cursor:grabbing; }
   .floating-bubble-reset { color:rgba(255,255,255,.3); }
   .floating-bubble-reset:hover { color:#fbbf24; border-color:rgba(251,191,36,.4); background:rgba(251,191,36,.08); }
+  .layout-divider { display:block; width:1px; margin:.25rem .1rem; background:rgba(255,255,255,.16); }
   .cinema-mode .hud-panel, .cinema-mode .floating-bubbles, .cinema-mode .doodle-ai-panel { opacity:0; pointer-events:none; transform:translateY(-10px); transition:opacity .2s ease, transform .2s ease; }
   .cinema-mode .hud-panel { transform:translateY(-10px) scale(.98); }
   .cinema-mode::after { content:"CINEMA MODE · press C or Esc to restore panels"; position:absolute; left:50%; top:1rem; z-index:22; transform:translateX(-50%); border:1px solid rgba(215,255,72,.25); border-radius:999px; padding:.45rem .7rem; color:rgba(215,255,72,.8); background:rgba(8,11,16,.72); font-size:9px; font-weight:900; letter-spacing:.1em; backdrop-filter:blur(14px); }
