@@ -56,17 +56,17 @@ export const appRouter = router({
     }),
     generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string() })).mutation(async ({ input }) => {
       const provider = getThreeDProvider();
-      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured. Set THREE_D_PROVIDER_URL and THREE_D_PROVIDER_API_KEY on the server." });
+      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured. Add TRIPO_API_KEY as a server secret (or configure the legacy provider adapter). No fake model was created." });
       return provider.generate(input);
     }),
     jobStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input }) => {
       const provider = getThreeDProvider();
-      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured." });
+      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured. Add TRIPO_API_KEY as a server secret." });
       return provider.getStatus(input.jobId);
     }),
     cancelJob: publicProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input }) => {
       const provider = getThreeDProvider();
-      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured." });
+      if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "3D provider not configured. Add TRIPO_API_KEY as a server secret." });
       return provider.cancel(input.jobId);
     }),
   }),

@@ -20,7 +20,7 @@ describe("forge provider contracts", () => {
   });
 
   it("does not fabricate a 3D asset when no provider is configured", async () => {
-    if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
+    if (process.env.TRIPO_API_KEY || (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY)) return;
     await expect(appRouter.createCaller(createContext()).forge.generate3D({
       prompt: "a compact sci-fi explorer robot",
       polygonCount: "20K",
@@ -29,12 +29,12 @@ describe("forge provider contracts", () => {
   });
 
   it("does not poll a fabricated job when no provider is configured", async () => {
-    if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
+    if (process.env.TRIPO_API_KEY || (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY)) return;
     await expect(appRouter.createCaller(createContext()).forge.jobStatus({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
   it("does not cancel a fabricated job when no provider is configured", async () => {
-    if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
+    if (process.env.TRIPO_API_KEY || (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY)) return;
     await expect(appRouter.createCaller(createContext()).forge.cancelJob({ jobId: "job-from-provider" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 

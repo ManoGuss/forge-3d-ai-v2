@@ -2,48 +2,59 @@
 
 ## Provider boundaries
 
-Forge keeps provider-specific code behind small server-only adapters:
+Forge keeps provider-specific code behind server-only adapters:
 
-- `ImageProvider` — currently backed by `server/_core/imageGeneration.ts` and Forge Image Service.
-- `ThreeDProvider` — currently implemented as `HttpThreeDProvider` in `server/providers/threeD.ts`.
+- `ImageProvider` — backed by `server/_core/imageGeneration.ts` and Forge Image Service.
+- `ThreeDProvider` — selected by `getThreeDProvider()` in `server/providers/threeD.ts`.
 - Future boundaries: `AnimationProvider`, `AudioProvider`, `RiggingProvider`.
 
-## Concept generation
+## Real 3D provider: Tripo v3
 
-`forge.generateConcept` receives the explicit prompt, selected style and up to six reference images. The server appends production-oriented instructions without replacing the user's intent, then sends the request to the configured image service.
+The default provider is **Tripo v3** when `TRIPO_API_KEY` is configured as a server secret. The integration uses the documented official endpoints:
 
-The server stores the returned concept URL in the generation history when the database is available.
+- `POST /v3/generation/text-to-model` for prompt-only generation.
+- `POST /v3/generation/image-to-model` for concept/reference generation.
+- `GET /v3/tasks/{task_id}` for asynchronous polling.
+- `GET /v3/account/balance` for credential health checks.
 
-## 3D provider contract
+The backend normalizes Tripo's `task_id`, `queued/running/success/failed/cancelled` states and `output.model_url` into the internal `ThreeDJob` contract. When a task succeeds, the server downloads the temporary Tripo GLB immediately and stores it with `storagePut()` under `models/tripo/`, so the viewer does not depend on Tripo's expiring URL.
 
-Configure `THREE_D_PROVIDER_URL` and `THREE_D_PROVIDER_API_KEY`. The endpoint should accept:
+Configure only on the server:
+
+```text
+TRIPO_API_KEY=...
+TRIPO_DEFAULT_MODEL=v3.1-20260211   # optional
+THREE_D_DEFAULT_PROVIDER=tripo      # optional; defaults to tripo
+```
+
+Never put `TRIPO_API_KEY` in `VITE_*` variables or client code. The browser calls our tRPC backend; only the backend calls Tripo.
+
+## Input mapping
+
+The `forge.generate3D` procedure accepts:
 
 ```json
 {
-  "prompt": "...",
-  "conceptUrl": "/manus-storage/...",
+  "prompt": "structured or user-authored 3D description",
+  "conceptUrl": "https://... or /manus-storage/...",
   "polygonCount": "20K",
   "textureQuality": "High"
 }
 ```
 
-It should return:
+- With `conceptUrl`, the server uses Tripo image-to-model and passes the prompt as additional guidance.
+- Without `conceptUrl`, the server uses Tripo text-to-model.
+- Polygon strings are normalized to a safe `face_limit` range.
+- Texture quality is normalized to Tripo's documented `fast`, `standard`, `detailed` or `extreme` values.
 
-```json
-{
-  "provider": "optional-provider-name",
-  "jobId": "provider-job-id",
-  "status": "queued | completed",
-  "modelUrl": "optional-completed-model-url"
-}
-```
+## Fallback and safety
 
-The UI only marks the job as queued after the provider accepts the request. A missing provider produces `PRECONDITION_FAILED`; it never manufactures a placeholder model.
+The legacy `THREE_D_PROVIDER_URL` + `THREE_D_PROVIDER_API_KEY` adapter remains available as a compatibility fallback when Tripo is not selected. No provider configured means `PRECONDITION_FAILED`; the application never fabricates a model or placeholder success.
 
-## Adding a new provider
+Tripo v3 does not expose a documented cancellation endpoint in the current task lifecycle API. The UI therefore reports cancellation failures honestly instead of pretending a task was cancelled.
 
-1. Implement `ThreeDProvider` in `server/providers/`.
-2. Select it in `getThreeDProvider()` using a server-only environment variable.
-3. Normalize provider responses to `ThreeDJob`.
-4. Add tests for accepted jobs, provider errors and missing credentials.
-5. Add polling as a server procedure once the provider exposes job status.
+## Tests
+
+- `server/providers/threeD.credentials.test.ts` calls the lightweight official balance endpoint without logging or exposing the key.
+- `server/forge.test.ts` verifies readiness and the no-fake-generation guard.
+- Run `pnpm check && pnpm test && pnpm build` before delivery.
