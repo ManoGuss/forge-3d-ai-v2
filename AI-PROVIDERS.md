@@ -1,51 +1,36 @@
-# Engines locais do Forge3D
+# Providers de IA do Forge3D
 
-## Princípio
+## Arquitetura híbrida gratuita
 
-O fluxo principal do Forge3D não depende de créditos, tokens ou APIs comerciais de geração. O navegador fala apenas com o backend do Forge; o backend conversa com engines locais/self-hosted. O AI Engine Manager executa bootstrap, auto-discovery, diagnóstico de hardware, seleção de perfil, health check e registro em `.ai-runtime.json`. URLs manuais são apenas fallback administrativo.
+O fluxo principal agora prioriza **Hugging Face Spaces públicos via Gradio Client**, sem Inference Providers, billing, créditos pré-pagos ou APIs comerciais:
 
-## 3D: Hunyuan3D-2.1
+1. `black-forest-labs/FLUX.1-schnell` → concept
+2. `tencent/Hunyuan3D-2` → GLB
+3. `microsoft/TRELLIS.2` → fallback gratuito de imagem para 3D
+4. Worker/local Flux e Hunyuan3D continuam opcionais para desenvolvimento/admin
 
-O adapter `server/providers/threeD.ts` usa a API FastAPI documentada oficialmente pelo projeto Tencent Hunyuan3D-2.1:
+O backend conecta uma vez, executa `view_api()`, descobre os endpoints e parâmetros reais do Space e guarda a conexão em cache. Nenhum endpoint `/predict`, `/infer` ou nome de parâmetro é assumido sem consultar o schema retornado pelo Space.
 
-- `POST /send` inicia uma geração assíncrona.
-- `GET /status/{uid}` consulta o job.
-- `GET /health` verifica a infraestrutura.
+## Fluxo de geração
 
-Configuração manual opcional para desenvolvimento/admin:
+- Texto em português é preservado e enviado com `promptLanguage: pt-BR`.
+- O endpoint de concept é descoberto por parâmetros que indiquem prompt e geração de imagem.
+- O resultado é baixado e salvo no storage do Forge em `generations/{timestamp}/concept.png`.
+- O frontend recebe uma URL interna do Forge, não fica dependente da URL temporária do Space.
 
-```text
-HUNYUAN3D_URL=http://127.0.0.1:8081
-```
+## Fluxo 3D
 
-A entrada é uma imagem de referência em data URL, acompanhada do prompt e dos parâmetros de textura/contagem de faces. Ao concluir, o adapter salva o `model_base64` retornado como GLB no storage do projeto. Sem um worker descoberto, caminho local válido ou `HUNYUAN3D_URL`, a aplicação mostra “Motor Hunyuan3D local indisponível” e não fabrica um modelo.
+- O endpoint compatível é descoberto por parâmetros de caption/texto e/ou imagem.
+- O concept é enviado como arquivo via `handle_file` do Gradio Client.
+- A saída é baixada e salva como `generations/{timestamp}/model.glb`.
+- Se o Hunyuan3D estiver indisponível, o registry tenta TRELLIS.2, sem fallback pago.
 
-Requisitos oficiais publicados pelo projeto incluem Linux, Python 3.8+, CUDA e NVIDIA GPU com pelo menos 24 GB para Hunyuan3D-2.1 (confira o README do repositório antes de instalar). O sandbox atual não possui NVIDIA/CUDA, portanto não tenta instalar ou fingir uma inferência local.
+## Disponibilidade e cota
 
-## Concept: Flux/ComfyUI local
+Os Spaces podem dormir, acordar, entrar em fila, falhar ou atingir limites gratuitos. O Forge traduz esses estados para mensagens amigáveis e não marca o provider como pronto sem conectar, descobrir endpoint, executar a chamada, baixar o resultado e validar que o arquivo não está vazio.
 
-O adapter `server/providers/image.ts` conversa com um gateway local de concept configurado por:
+Quando houver cota/rate limit/queue indisponível, a mensagem é: **“A cota gratuita do motor de IA foi atingida. Tente novamente mais tarde.”** Não há compra automática, cobrança, token obrigatório ou troca para provider pago.
 
-```text
-IMAGE_ENGINE_URL=http://127.0.0.1:8188/forge/concept
-COMFYUI_URL=http://127.0.0.1:8188
-AI_ENGINE_URL=http://127.0.0.1:9000
-```
+## Providers locais opcionais
 
-O gateway recebe `{ prompt, style, references, constraints }` e deve devolver `{ url }` ou `{ dataUrl }`; para jobs assíncronos, pode devolver `{ jobId, status, progress, stage }` e atender `GET /status/{jobId}`. O Manager também procura `COMFYUI_URL`, portas locais e `FORGE_WORKER_URL`. A interface não expõe nodes, CUDA ou parâmetros internos.
-
-## Health e fallback
-
-`providers.health` chama os health checks dos dois motores e retorna engine, GPU, VRAM, perfil AUTO/LOW_VRAM/BALANCED/HIGH_QUALITY, worker e diagnóstico. O Manager tenta iniciar processos apenas quando `COMFYUI_PATH`/`HUNYUAN3D_PATH` apontam para instalações existentes; nunca finge disponibilidade nem instala pesos gigantes sem GPU. Não existe fallback automático para Tripo, Meshy ou outro serviço pago.
-
-## AI Engine Manager e worker
-
-O bootstrap roda automaticamente quando o servidor inicia e também pode ser acionado pelo botão **Reparar IA**. Ele detecta Node, Python, Docker, GPU/CUDA, RAM, CPU, armazenamento, portas e workers registrados. O painel Projeto também oferece **Atualizar modelos**, que verifica o perfil e informa honestamente quando a GPU não está disponível.
-
-Para conectar uma máquina com GPU sem expor detalhes ao usuário, use `FORGE_WORKER_URL`/`WORKER_DISCOVERY_URL`. O worker deve responder `GET /health` com capabilities como `image_generation`, `3d_generation` e `fx`. O Manager prioriza esse worker antes de engines locais e escreve o runtime descoberto em `.ai-runtime.json`.
-
-O código preserva os adapters de exportação, viewer 3D, snapshots, histórico, doodle, gizmos e banco de projetos. O foco da UI foi reduzido para uma única janela Forge com abas Criar, Desenhar, 3D, Efeitos e Projeto.
-
-## Licenças
-
-Hunyuan3D-2.1 é distribuído pelo repositório oficial Tencent-Hunyuan. Verifique o arquivo de licença e os termos dos pesos antes de uso comercial ou redistribuição. Flux/ComfyUI deve ser instalado com pesos e licença compatíveis com o uso pretendido.
+`IMAGE_ENGINE_URL`, `HUNYUAN3D_URL`, `COMFYUI_URL` e `FORGE_WORKER_URL` permanecem compatíveis para workers próprios, mas não são necessários para o uso normal quando os Spaces gratuitos estão acessíveis.

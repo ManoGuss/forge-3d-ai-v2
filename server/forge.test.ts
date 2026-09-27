@@ -7,15 +7,15 @@ function createContext(): TrpcContext { return { user: null, req: {} as TrpcCont
 describe("contratos do gateway local Forge", () => {
   it("reporta engines locais sem expor segredos", async () => {
     const result = await appRouter.createCaller(createContext()).providers.status();
-    expect(result.image.id).toBe("flux-local-gateway");
-    expect(result.threeD.id).toBe("hunyuan3d-local");
+    expect(["flux-local-gateway", "huggingface-flux-space"]).toContain(result.image.id);
+    expect(["hunyuan3d-local", "huggingface-hunyuan-space"]).toContain(result.threeD.id);
     expect(result).not.toHaveProperty("apiKey");
     expect(result).not.toHaveProperty("endpoint");
-    expect(result.note).toContain("engines locais");
+    expect(result.note).toContain("engines");
   });
 
   it("reporta honestamente quando o motor Hunyuan3D não está configurado", async () => {
-    if (process.env.HUNYUAN3D_URL) return;
+    if (process.env.HUNYUAN3D_URL || process.env.DISABLE_HUGGINGFACE_SPACES !== "1") return;
     const result = await appRouter.createCaller(createContext()).providers.health();
     expect(result.threeD.available).toBe(false);
     expect(result.threeD.engine).toBe("Hunyuan3D-2.1");
@@ -23,12 +23,12 @@ describe("contratos do gateway local Forge", () => {
   });
 
   it("não fabrica um modelo sem engine local configurado", async () => {
-    if (process.env.HUNYUAN3D_URL) return;
+    if (process.env.HUNYUAN3D_URL || process.env.DISABLE_HUGGINGFACE_SPACES !== "1") return;
     await expect(appRouter.createCaller(createContext()).forge.generate3D({ prompt: "uma espada de cristal", polygonCount: "40K", textureQuality: "High" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
   it("não fabrica um concept sem gateway de imagem local configurado", async () => {
-    if (process.env.IMAGE_ENGINE_URL) return;
+    if (process.env.IMAGE_ENGINE_URL || process.env.DISABLE_HUGGINGFACE_SPACES !== "1") return;
     await expect(appRouter.createCaller(createContext()).forge.generateConcept({ projectName: "Teste", prompt: "uma espada de cristal", style: "Pronto para jogo" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 

@@ -175,11 +175,12 @@ export async function getLocalEngineHealth(): Promise<LocalEngineHealth> {
 export function getProviderStatus() {
   const threeDConfigured = Boolean(engineUrl());
   const imageConfigured = Boolean(process.env.IMAGE_ENGINE_URL);
+  const huggingFaceEnabled = process.env.DISABLE_HUGGINGFACE_SPACES !== "1";
   return {
-    image: { id: "flux-local-gateway", configured: imageConfigured, capabilities: imageConfigured ? ["concept", "image-to-image"] : [] },
-    threeD: { id: "hunyuan3d-local", configured: threeDConfigured, capabilities: threeDConfigured ? ["image-to-3d", "glb", "polling"] : [] },
+    image: { id: huggingFaceEnabled ? "huggingface-flux-space" : "flux-local-gateway", configured: imageConfigured || huggingFaceEnabled, capabilities: huggingFaceEnabled ? ["concept", "gradio", "zero-gpu"] : imageConfigured ? ["concept", "image-to-image"] : [] },
+    threeD: { id: huggingFaceEnabled ? "huggingface-hunyuan-space" : "hunyuan3d-local", configured: threeDConfigured || huggingFaceEnabled, capabilities: huggingFaceEnabled ? ["image-to-3d", "glb", "gradio", "zero-gpu"] : threeDConfigured ? ["image-to-3d", "glb", "polling"] : [] },
     fx: { id: "local-fx", configured: false, capabilities: ["procedural-particles", "materials", "animation"] },
     localEngine: { engine: "Hunyuan3D-2.1", urlConfigured: threeDConfigured, status: threeDConfigured ? "Configurado; aguardando health check" : "Motor local não configurado" },
-    note: "O Forge usa engines locais configuráveis. Nenhuma API comercial ou crédito por geração é usado pelo fluxo principal.",
+    note: "O Forge prioriza Spaces Gradio gratuitos e mantém engines locais opcionais. Nenhuma API comercial, Inference Provider ou crédito por geração é usado pelo fluxo principal.",
   };
 }
