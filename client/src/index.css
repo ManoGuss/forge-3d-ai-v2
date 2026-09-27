@@ -123,6 +123,24 @@ button:active { transform: scale(.97); }
   .camera-action:hover { border-color:rgba(215,255,72,.4); color:#d7ff48; background:rgba(215,255,72,.08); }
   .camera-action kbd { border:1px solid rgba(255,255,255,.14); border-radius:.25rem; padding:.04rem .22rem; color:rgba(255,255,255,.38); font-size:8px; }
   .snapshot-card { border:1px solid rgba(255,255,255,.09); border-radius:.7rem; padding:.55rem; background:rgba(255,255,255,.025); }
+  .hud-close { display:grid; height:1.65rem; width:1.65rem; place-items:center; border:1px solid rgba(255,255,255,.1); border-radius:999px; color:rgba(255,255,255,.45); background:rgba(255,255,255,.04); font-size:1rem; line-height:1; }
+  .hud-close:hover { border-color:rgba(215,255,72,.4); color:#d7ff48; background:rgba(215,255,72,.08); }
+  .floating-bubbles { position:absolute; left:50%; top:1rem; z-index:25; display:flex; transform:translateX(-50%); gap:.4rem; border:1px solid rgba(255,255,255,.12); border-radius:999px; padding:.35rem; background:rgba(11,16,23,.82); box-shadow:0 10px 30px rgba(0,0,0,.26); backdrop-filter:blur(16px); }
+  .floating-bubble { border:1px solid transparent; border-radius:999px; padding:.45rem .7rem; color:rgba(255,255,255,.45); background:transparent; font-size:9px; font-weight:900; letter-spacing:.08em; }
+  .floating-bubble:hover, .floating-bubble-active { border-color:rgba(215,255,72,.35); color:#d7ff48; background:rgba(215,255,72,.1); }
+  .doodle-ai-panel { position:absolute; left:50%; top:5.2rem; z-index:24; width:min(720px,calc(100% - 2rem)); transform:translateX(-50%); border:1px solid rgba(255,255,255,.16); border-radius:1.15rem; padding:1rem; background:rgba(11,16,23,.9); box-shadow:0 24px 70px rgba(0,0,0,.42); backdrop-filter:blur(20px); }
+  .doodle-ai-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+  .doodle-ai-label { display:flex; justify-content:space-between; margin-bottom:.4rem; color:rgba(255,255,255,.42); font-size:9px; font-weight:900; letter-spacing:.14em; }
+  .ai-preview-card { display:grid; min-height:220px; place-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:1rem; background:#111824; }
+  .live-prompt-input { min-width:0; flex:1; border:1px solid rgba(255,255,255,.12); border-radius:.7rem; padding:.65rem .75rem; color:rgba(255,255,255,.85); background:rgba(255,255,255,.04); font-size:.72rem; outline:none; }
+  .live-prompt-input:focus { border-color:rgba(215,255,72,.45); box-shadow:0 0 0 2px rgba(215,255,72,.08); }
+  .doodle-launcher { display:flex; width:100%; align-items:center; gap:.7rem; border:1px solid rgba(215,255,72,.18); border-radius:.9rem; padding:.75rem; color:rgba(255,255,255,.7); background:rgba(215,255,72,.05); text-align:left; }
+  .doodle-launcher:hover { border-color:rgba(215,255,72,.5); background:rgba(215,255,72,.1); }
+  .doodle-launcher b, .doodle-launcher small { display:block; }
+  .doodle-launcher b { color:#fff; font-size:.72rem; }
+  .doodle-launcher small { margin-top:.15rem; color:rgba(255,255,255,.35); font-size:.6rem; }
+  .doodle-launcher-icon { display:grid; height:2rem; width:2rem; place-items:center; border-radius:.6rem; color:#10140c; background:#d7ff48; font-weight:900; }
+  @media (max-width: 760px) { .floating-bubbles { left:.75rem; right:.75rem; width:auto; transform:none; justify-content:center; } .floating-bubble { flex:1; padding-left:.35rem; padding-right:.35rem; font-size:8px; } .doodle-ai-grid { grid-template-columns:1fr; } .doodle-ai-panel { top:5rem; max-height:calc(100vh - 6rem); overflow-y:auto; } }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
