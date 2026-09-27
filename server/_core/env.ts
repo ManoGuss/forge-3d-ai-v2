@@ -11,4 +11,9 @@ export const ENV = {
   comfyUiUrl: process.env.COMFYUI_URL ?? "",
   hunyuan3dUrl: process.env.HUNYUAN3D_URL ?? "",
   aiEngineUrl: process.env.AI_ENGINE_URL ?? "",
+  comfyUiPath: process.env.COMFYUI_PATH ?? "",
+  hunyuan3dPath: process.env.HUNYUAN3D_PATH ?? "",
+  forgeWorkerUrl: process.env.FORGE_WORKER_URL ?? "",
+  workerDiscoveryUrl: process.env.WORKER_DISCOVERY_URL ?? "",
+  forgeAiRuntimePath: process.env.FORGE_AI_RUNTIME_PATH ?? "",
 };

@@ -8,6 +8,8 @@ import { createForgeGeneration, createForgeProject, createForgeSnapshot, deleteF
 import { generateLocalConcept, getLocalConceptStatus, getLocalImageHealth, isLocalImageConfigured } from "./providers/image";
 import { getLocalEngineHealth, getProviderStatus, getThreeDProvider } from "./providers/threeD";
 import { storagePut } from "./storage";
+import { bootstrapAiEngines, getAiRuntime, repairAiEngines, stopAiEngines, updateLocalModels } from "./ai/engineManager";
+import { runMockFx } from "./ai/fxWorker";
 
 const imageInput = z.object({ url: z.string().optional(), b64Json: z.string().optional(), mimeType: z.string().optional() });
 const promptInput = z.object({ projectId: z.number().optional(), projectName: z.string().min(1).max(180), prompt: z.string().min(3).max(6000), style: z.string().min(1).max(64), originalImages: z.array(imageInput).max(6).optional() });
@@ -19,8 +21,12 @@ export const appRouter = router({
     logout: publicProcedure.mutation(({ ctx }) => { const cookieOptions = getSessionCookieOptions(ctx.req); ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 }); return { success: true } as const; }),
   }),
   providers: router({
-    status: publicProcedure.query(() => getProviderStatus()),
-    health: publicProcedure.query(async () => ({ image: await getLocalImageHealth(), threeD: await getLocalEngineHealth() })),
+    status: publicProcedure.query(async () => { const runtime = await getAiRuntime(); return { ...getProviderStatus(), runtime }; }),
+    health: publicProcedure.query(async () => { await bootstrapAiEngines(true); return { image: await getLocalImageHealth(), threeD: await getLocalEngineHealth(), runtime: await getAiRuntime() }; }),
+    repair: publicProcedure.mutation(() => repairAiEngines()),
+    updateModels: publicProcedure.mutation(() => updateLocalModels()),
+    stop: publicProcedure.mutation(() => stopAiEngines()),
+    worker: publicProcedure.query(() => getAiRuntime().then(runtime => runtime.worker ?? { status: "not-registered" })),
   }),
   projects: router({
     list: publicProcedure.query(({ ctx }) => listForgeProjects(ctx.user?.id)),
@@ -36,6 +42,7 @@ export const appRouter = router({
   }),
   forge: router({
     generateConcept: publicProcedure.input(promptInput).mutation(async ({ input }) => {
+      await bootstrapAiEngines();
       if (!isLocalImageConfigured()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Motor de concept local indisponível. Configure IMAGE_ENGINE_URL para conectar Flux/ComfyUI. Nenhuma API paga será usada." });
       const enhancedPrompt = [input.prompt, `Direção visual: ${input.style}.`, "Concept para reconstrução 3D: objeto único, inteiro visível, centralizado, fundo neutro, iluminação de estúdio, sem texto e sem marca d'água."].join(" ");
       const generationId = await createForgeGeneration({ projectId: input.projectId, prompt: input.prompt, style: input.style, status: "pending", provider: "flux-local-gateway" });
@@ -50,12 +57,16 @@ export const appRouter = router({
     }),
     conceptStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => getLocalConceptStatus(input.jobId)),
     generate3D: publicProcedure.input(z.object({ prompt: z.string().min(3), conceptUrl: z.string().optional(), polygonCount: z.string(), textureQuality: z.string() })).mutation(async ({ input }) => {
+      await bootstrapAiEngines();
       const provider = getThreeDProvider();
       if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Motor Hunyuan3D local indisponível. Configure HUNYUAN3D_URL no servidor. Nenhum modelo foi criado." });
       try { return await provider.generate(input); } catch (error) { throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error ? error.message : "Falha ao iniciar a geração 3D local" }); }
     }),
-    jobStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input }) => { const provider = getThreeDProvider(); if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Motor Hunyuan3D local indisponível." }); return provider.getStatus(input.jobId); }),
-    cancelJob: publicProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input }) => { const provider = getThreeDProvider(); if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Motor Hunyuan3D local indisponível." }); return provider.cancel(input.jobId); }),
+    jobStatus: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input }) => { await bootstrapAiEngines(); const provider = getThreeDProvider(); if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Motor Hunyuan3D local indisponível." }); return provider.getStatus(input.jobId); }),
+    cancelJob: publicProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input }) => { await bootstrapAiEngines(); const provider = getThreeDProvider(); if (!provider) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Motor Hunyuan3D local indisponível." }); return provider.cancel(input.jobId); }),
+  }),
+  fx: router({
+    preview: publicProcedure.input(z.object({ kind: z.enum(["particulas", "shader", "animacao"]), use: z.enum(["item", "cenario", "hud", "ux"]), prompt: z.string().max(1000).optional() })).mutation(({ input }) => runMockFx(input)),
   }),
 });
 

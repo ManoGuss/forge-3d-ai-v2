@@ -147,10 +147,13 @@ class Hunyuan3DProvider implements ThreeDProvider {
 }
 
 let cachedProvider: ThreeDProvider | null | undefined;
+let cachedProviderUrl = "";
 
 export function getThreeDProvider(): ThreeDProvider | null {
-  if (cachedProvider !== undefined) return cachedProvider;
-  cachedProvider = engineUrl() ? new Hunyuan3DProvider(engineUrl()) : null;
+  const url = engineUrl();
+  if (cachedProvider !== undefined && cachedProviderUrl === url) return cachedProvider;
+  cachedProviderUrl = url;
+  cachedProvider = url ? new Hunyuan3DProvider(url) : null;
   return cachedProvider;
 }
 
