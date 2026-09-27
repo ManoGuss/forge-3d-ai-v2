@@ -22,6 +22,7 @@ function friendlyError(error: unknown, space: string) {
   if (lower.includes("sleep") || lower.includes("waking") || lower.includes("building") || lower.includes("queue")) return new Error("O motor gratuito de IA está acordando ou ocupado. Aguarde alguns instantes e tente novamente.");
   if (lower.includes("runtime") || lower.includes("space_error") || lower.includes("not found")) return new Error(`O Space gratuito ${space} está temporariamente indisponível. Tente novamente.`);
   if (lower.includes("timeout") || lower.includes("abort")) return new Error("O motor gratuito de IA demorou mais que o esperado. Tente novamente.");
+  if (lower.includes("service unavailable") || lower.includes("unexpected token 's'") || lower.includes('unexpected token "s"')) return new Error(`O Space gratuito ${space} respondeu temporariamente com Service Unavailable. O Forge tentou novamente e acionará o fallback gratuito; tente novamente em alguns instantes.`);
   if (lower === "an error occurred" || lower.includes("an error occurred")) return new Error(`O Space gratuito ${space} encontrou uma falha transitória. O fallback será tentado automaticamente; tente novamente em alguns instantes.`);
   return new Error(`Não foi possível usar o motor gratuito ${space}: ${message}`);
 }
@@ -108,7 +109,7 @@ async function saveResult(value: unknown, key: string, mimeType: string) {
   return storagePut(key, bytes, mimeType);
 }
 
-async function runWithRetry<T>(task: () => Promise<T>) { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) { try { return await task(); } catch (error) { last = error; if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 900 * (attempt + 1))); } } throw last; }
+async function runWithRetry<T>(task: () => Promise<T>) { let last: unknown; for (let attempt = 0; attempt < 4; attempt += 1) { try { return await task(); } catch (error) { last = error; if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1400 * (attempt + 1))); } } throw last; }
 
 export async function inspectHuggingFaceSpace(space: string) { try { const connection = await connect(space); return { space, available: true, endpointCount: Object.keys(connection.api.named_endpoints ?? {}).length, endpoints: Object.keys(connection.api.named_endpoints ?? {}) }; } catch (error) { return { space, available: false, endpointCount: 0, endpoints: [], status: error instanceof Error ? error.message : String(error) }; } }
 
