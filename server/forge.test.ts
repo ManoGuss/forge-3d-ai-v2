@@ -1,0 +1,30 @@
+import { describe, expect, it } from "vitest";
+import { appRouter } from "./routers";
+import type { TrpcContext } from "./_core/context";
+
+function createContext(): TrpcContext {
+  return {
+    user: null,
+    req: {} as TrpcContext["req"],
+    res: {} as TrpcContext["res"],
+  };
+}
+
+describe("forge provider contracts", () => {
+  it("reports provider readiness without exposing server credentials", async () => {
+    const result = await appRouter.createCaller(createContext()).providers.status();
+    expect(result.image.id).toBe("forge-image-service");
+    expect(result).not.toHaveProperty("apiKey");
+    expect(result).not.toHaveProperty("endpoint");
+    expect(typeof result.threeD.configured).toBe("boolean");
+  });
+
+  it("does not fabricate a 3D asset when no provider is configured", async () => {
+    if (process.env.THREE_D_PROVIDER_URL && process.env.THREE_D_PROVIDER_API_KEY) return;
+    await expect(appRouter.createCaller(createContext()).forge.generate3D({
+      prompt: "a compact sci-fi explorer robot",
+      polygonCount: "20K",
+      textureQuality: "High",
+    })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
+});
