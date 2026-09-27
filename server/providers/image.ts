@@ -18,7 +18,7 @@ async function request(url: string, init?: RequestInit) {
 export async function generateLocalConcept(input: { prompt: string; style: string; originalImages?: ImageInput[] }): Promise<ConceptJob> {
   const url = gatewayUrl();
   if (!url) throw new Error("Motor de concept local indisponível. Configure IMAGE_ENGINE_URL para conectar Flux/ComfyUI.");
-  const payload = await request(url, { method: "POST", body: JSON.stringify({ prompt: input.prompt, style: input.style, references: input.originalImages ?? [], constraints: ["objeto único", "inteiro visível", "centralizado", "fundo neutro", "iluminação de estúdio", "sem texto", "sem marca d'água"] }) });
+  const payload = await request(url, { method: "POST", body: JSON.stringify({ prompt: input.prompt, promptLanguage: "pt-BR", language: "pt-BR", preservePrompt: true, style: input.style, references: input.originalImages ?? [], constraints: ["objeto único", "inteiro visível", "centralizado", "fundo neutro", "iluminação de estúdio", "sem texto", "sem marca d'água"] }) });
   const status = mapStatus(payload.status ?? (readUrl(payload) ? "completed" : payload.jobId ? "queued" : undefined));
   return { provider: payload.provider ?? "flux-local-gateway", jobId: payload.jobId, status, progress: payload.progress ?? (status === "completed" ? 100 : 4), stage: payload.stage ?? (status === "completed" ? "Concept pronto" : "Job enviado ao Flux/ComfyUI"), url: readUrl(payload), error: payload.error ?? payload.message };
 }

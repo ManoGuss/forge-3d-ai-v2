@@ -120,6 +120,9 @@ class Hunyuan3DProvider implements ThreeDProvider {
         face_count: faceCount(input.polygonCount),
         type: "glb",
         prompt: input.prompt,
+        promptLanguage: "pt-BR",
+        language: "pt-BR",
+        preservePrompt: true,
       }),
     });
     const jobId = task.uid;
